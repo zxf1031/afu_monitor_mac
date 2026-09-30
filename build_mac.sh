@@ -18,6 +18,7 @@ file "$PY" || true
   --noconfirm \
   --clean \
   --target-architecture universal2 \
+  --codesign-identity - \
   --name "AFU协议监控" \
   --osx-bundle-identifier com.afu.wearable.monitor \
   --hidden-import serial \
@@ -50,7 +51,9 @@ for item in found:
 print("架构和最低系统版本检查通过")
 PY
 
-codesign --force --deep --sign - "$APP"
+# 不要再执行 codesign --deep。--deep 会拆掉 PyInstaller 已经签好的 .app，
+# Finder 双击会闪退，但直接运行 Contents/MacOS 里的程序仍然能打开。
+codesign --verify --strict "$APP"
 ditto -c -k --keepParent "$APP" "dist/AFU协议监控-macos.zip"
 echo "已生成 $APP"
 echo "已生成 dist/AFU协议监控-macos.zip"
