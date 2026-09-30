@@ -3068,7 +3068,13 @@ class HciAfuStitcher:
 
 def app_dir():
     if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
+        exe = Path(sys.executable).resolve()
+        # PyInstaller 的 .app 结构是 Name.app/Contents/MacOS/程序名。
+        # 日志放在 .app 旁边，避免写进应用包里面。
+        if (sys.platform == "darwin" and exe.parent.name == "MacOS"
+                and exe.parent.parent.name == "Contents"):
+            return exe.parents[3]
+        return exe.parent
     return Path(__file__).resolve().parent
 
 
