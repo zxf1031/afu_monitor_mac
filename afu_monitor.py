@@ -3070,12 +3070,18 @@ def app_dir():
     if getattr(sys, "frozen", False):
         exe = Path(sys.executable).resolve()
         # PyInstaller 的 .app 结构是 Name.app/Contents/MacOS/程序名。
-        # 日志放在 .app 旁边，避免写进应用包里面。
         if (sys.platform == "darwin" and exe.parent.name == "MacOS"
                 and exe.parent.parent.name == "Contents"):
             return exe.parents[3]
         return exe.parent
     return Path(__file__).resolve().parent
+
+
+def default_log_dir():
+    """macOS 从访达打开 .app 时，应用会被放到只读的随机目录。日志必须写到用户目录。"""
+    if sys.platform == "darwin" and getattr(sys, "frozen", False):
+        return Path.home() / "Library" / "Application Support" / "AFUMonitor" / "logs"
+    return app_dir() / "logs"
 
 
 def install_crash_log(log_dir: Path):
@@ -3356,7 +3362,7 @@ class MonitorApp:
         self.hci = HciAfuStitcher()
         self.fw_rt = FwRealtimeTrace()
         self.segment_stamp = None
-        self.log_root = Path(args.log_dir) if args.log_dir else (app_dir() / "logs")
+        self.log_root = Path(args.log_dir) if args.log_dir else default_log_dir()
         self.serial_log = SegmentedLog(self.log_root / "serial")
         self.parsed_log = SegmentedLog(self.log_root / "parsed")
 
@@ -4395,7 +4401,7 @@ def main():
     args = ap.parse_args()
     if args.selftest:
         sys.exit(run_selftest())
-    log_dir = Path(args.log_dir) if args.log_dir else (app_dir() / "logs")
+    log_dir = Path(args.log_dir) if args.log_dir else default_log_dir()
     crash_hook = install_crash_log(log_dir)
     try:
         root = tk.Tk()

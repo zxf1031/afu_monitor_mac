@@ -19,14 +19,18 @@ file "$PY" || true
   --clean \
   --target-architecture universal2 \
   --codesign-identity - \
-  --name "AFU协议监控" \
+  --name "AFUMonitor" \
   --osx-bundle-identifier com.afu.wearable.monitor \
   --hidden-import serial \
   --hidden-import serial.tools.list_ports \
   afu_monitor.py
 
-APP="dist/AFU协议监控.app"
-BIN="$APP/Contents/MacOS/AFU协议监控"
+APP="dist/AFUMonitor.app"
+BIN="$APP/Contents/MacOS/AFUMonitor"
+# 菜单栏显示中文。包名和可执行文件必须是英文，否则访达按 Info.plist 找不到程序，双击打不开。
+/usr/libexec/PlistBuddy -c "Set :CFBundleName AFU协议监控" "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName AFU协议监控" "$APP/Contents/Info.plist" \
+  || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string AFU协议监控" "$APP/Contents/Info.plist"
 lipo -info "$BIN"
 ARCHS="$(lipo -archs "$BIN")"
 echo "主程序架构: $ARCHS"
@@ -51,9 +55,9 @@ for item in found:
 print("架构和最低系统版本检查通过")
 PY
 
-# 不要再执行 codesign --deep。--deep 会拆掉 PyInstaller 已经签好的 .app，
-# Finder 双击会闪退，但直接运行 Contents/MacOS 里的程序仍然能打开。
+# 改完 Info.plist 后只重签最外层，不要用 --deep。
+codesign --force --sign - "$APP"
 codesign --verify --strict "$APP"
-ditto -c -k --keepParent "$APP" "dist/AFU协议监控-macos.zip"
+ditto -c -k --keepParent "$APP" "dist/AFUMonitor-macos.zip"
 echo "已生成 $APP"
-echo "已生成 dist/AFU协议监控-macos.zip"
+echo "已生成 dist/AFUMonitor-macos.zip"

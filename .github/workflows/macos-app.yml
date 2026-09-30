@@ -25,5 +25,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: AFU-monitor-macos
-          path: dist/AFU协议监控-macos.zip
+          path: dist/AFUMonitor-macos.zip
           if-no-files-found: error
