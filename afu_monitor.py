@@ -3242,6 +3242,7 @@ class SegmentedLog:
         self.started = 0.0
         self.written = 0
         self._pending = 0
+        self._dirty_at = 0.0
         self._lock = threading.Lock()
 
     def set_segment(self, stamp: str):
@@ -3258,6 +3259,7 @@ class SegmentedLog:
         except OSError:
             self.written = 0
         self._pending = 0
+        self._dirty_at = 0.0
 
     def write(self, line: str):
         with self._lock:
@@ -3266,10 +3268,13 @@ class SegmentedLog:
             if not line.endswith("\n"):
                 line += "\n"
             try:
+                if self._pending == 0:
+                    self._dirty_at = time.monotonic()
                 self.fp.write(line)
                 self.written += len(line.encode("utf-8"))
                 self._pending += 1
-                if self._pending >= 40:
+                # 高速刷屏时按块合并；安静下来由读线程和界面定时把尾巴写出去。
+                if self._pending >= 48:
                     self._flush()
             except OSError:
                 pass
@@ -3278,6 +3283,12 @@ class SegmentedLog:
         with self._lock:
             self._flush()
 
+    def flush_if_due(self, max_age=0.05):
+        """还有没落盘的内容，并且已经过了这一小段时间，就写出去。"""
+        with self._lock:
+            if self._pending and (time.monotonic() - self._dirty_at) >= max_age:
+                self._flush()
+
     def _flush(self):
         if self.fp:
             try:
@@ -3285,6 +3296,7 @@ class SegmentedLog:
             except OSError:
                 pass
             self._pending = 0
+            self._dirty_at = 0.0
 
     def close(self):
         with self._lock:
@@ -3841,17 +3853,23 @@ class MonitorApp:
                 if not data:
                     continue
                 buf += data
+                wrote = False
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
                     ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
                     text = line.decode("utf-8", "replace").rstrip("\r")
                     self._ingest_line(ts, text)
+                    wrote = True
+                if wrote:
+                    self.serial_log.flush()
         finally:
             if buf:
                 ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
                 text = buf.decode("utf-8", "replace").rstrip("\r")
                 if text:
                     self._ingest_line(ts, text)
+            self.serial_log.flush()
+            self.parsed_log.flush()
 
     def _open_file(self, path):
         self._set_status(f"离线回放: {path}", C["blue"])
@@ -4014,6 +4032,8 @@ class MonitorApp:
             except Exception:
                 pass
         try:
+            self.serial_log.flush_if_due()
+            self.parsed_log.flush_if_due()
             ui_pending = (not self.queue.empty()) or (not self.parsed_ui_q.empty())
             if self._see_pending and not ui_pending:
                 self._catch_up_scroll()
@@ -4095,6 +4115,7 @@ class MonitorApp:
                 parsed_batch.append((f"    {ln}", head_tags))
             parsed_batch.append(("", head_tags))
         self.parsed_log.write("\n".join(block))
+        self.parsed_log.flush()
 
     def _dispatch_kind(self, ts, text, kind, parsed_batch, track=True):
         if kind == "fw":
