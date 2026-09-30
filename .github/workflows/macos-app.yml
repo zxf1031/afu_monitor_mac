@@ -1,0 +1,29 @@
+name: Build macOS app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  app:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install python.org Python with Tk
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/python.pkg" \
+            https://www.python.org/ftp/python/3.14.6/python-3.14.6-macos11.pkg
+          sudo installer -pkg "$RUNNER_TEMP/python.pkg" -target /
+
+      - name: Build app
+        env:
+          PYTHON: /Library/Frameworks/Python.framework/Versions/3.14/bin/python3
+        run: bash build_mac.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AFU-monitor-macos
+          path: dist/AFU协议监控-macos.zip
+          if-no-files-found: error
