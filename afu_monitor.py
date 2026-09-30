@@ -139,7 +139,7 @@ END_REASONS = {0: "NONE", 1: "USER_STOP(用户结束)", 2: "AUTO_LOW_ACTIVITY(�
 DATASETS = {1: "HEALTH_HISTORY(健康)", 2: "ALGORITHM_INTERMEDIATE(算法中间)",
             3: "DIAGNOSTIC(诊断)", 4: "EXERCISE_HISTORY(运动记录)"}
 FACT_TYPES = {
-    0x01: "STEPS(步数)", 0x02: "CALORIES(热量)",
+    0x01: "STEPS(步数)", 0x02: "CALORIES(卡路里)",
     0x10: "SLEEP_SUMMARY", 0x11: "SLEEP_STAGE", 0x12: "SLEEP_ONSET", 0x13: "SLEEP_WAKEUP",
     0x20: "HEART_RATE(心率)", 0x21: "RESTING_HR(静息心率)", 0x22: "HRV",
     0x23: "BOXYGEN(血氧)", 0x24: "STRESS(压力)", 0x25: "BREATH_RATE(呼吸)",
@@ -250,7 +250,7 @@ def build_afu_frame(domain, opcode, flags, rid, payload=b""):
 
 
 FACT_CN = {
-    0x01: "步数", 0x02: "热量",
+    0x01: "步数", 0x02: "卡路里",
     0x10: "睡眠汇总", 0x11: "睡眠阶段", 0x12: "入睡", 0x13: "出睡",
     0x20: "心率", 0x21: "静息心率", 0x22: "心率变异性",
     0x23: "血氧", 0x24: "压力", 0x25: "呼吸",
@@ -422,7 +422,7 @@ def exercise_body_text(data):
             parts.append(text)
 
     add(0, f"距离{u32(data, 32) / 100:.2f}米")
-    add(1, f"热量{u32(data, 36) / 100:.2f}kcal")
+    add(1, f"卡路里{u32(data, 36) / 100:.2f}kcal")
     add(2, f"当时心率{data[91]}bpm")
     add(3, f"当时速度{u32(data, 40) / 100:.2f}{cur_speed_unit}")
     add(4, f"步数{u32(data, 60)}")
@@ -2157,7 +2157,7 @@ def realtime_metric_parts(p):
 
     add(0, f"心率={p[36]}bpm")
     add(1, f"最高心率={p[37]}bpm")
-    add(2, f"热量={_x100(u32(p, 40))}kcal")
+    add(2, f"卡路里={_x100(u32(p, 40))}kcal")
     add(3, f"步数={u32(p, 44)}")
     add(4, f"游泳趟数={u16(p, 52)}")
     add(5, f"划水次数={u16(p, 54)}")
@@ -2681,6 +2681,26 @@ def plain_summary(direction, domain, opcode, flags, payload):
     else:
         text = f"{head}：{detail}" if detail else f"{head}：{base}"
     return text
+
+
+def view_category(summary):
+    """右边筛选用。对不上这四类的内容始终显示。"""
+    if "固件日志" in summary or "固件实时日志" in summary:
+        return "cat_fw"
+    if "APP下发" in summary:
+        return "cat_app"
+    if "设备上报" in summary:
+        return "cat_event"
+    if "设备回复" in summary:
+        return "cat_reply"
+    return None
+
+
+def view_tags(level, summary):
+    cat = view_category(summary)
+    if not cat:
+        return level
+    return (level, cat)
 
 
 # (domain, opcode, kind) -> 解析函数; kind: req/resp/any
@@ -3293,29 +3313,41 @@ class SegmentedLog:
 # GUI
 # ---------------------------------------------------------------------------
 
+# 工具栏对齐 band_tool 串口页：浅底、黑主按钮、白描边、安静按钮、红描边。
+# 日志区保持深色。macOS 的 Aqua 按钮不认 tk.Button 的 bg，所以按钮用 clam 主题画出来。
 C = {
-    "bg": "#0d1117",
-    "panel": "#161b22",
-    "bar": "#010409",
-    "border": "#30363d",
-    "text": "#e6edf3",
-    "muted": "#8b949e",
-    "green": "#3fb950",
-    "blue": "#58a6ff",
-    "red": "#f85149",
-    "purple": "#d2a8ff",
-    "orange": "#d29922",
-    "accent": "#238636",
-    "btn": "#21262d",
-    "btn_hover": "#30363d",
-    "input": "#0d1117",
-    "log_bg": "#010409",
+    "bg": "#f3f3f1",
+    "panel": "#ffffff",
+    "bar": "#ffffff",
+    "border": "#e4e4e4",
+    "line": "#ececec",
+    "text": "#161616",
+    "muted": "#737373",
+    "green": "#0c7a4e",
+    "blue": "#1d4ed8",
+    "red": "#9f1239",
+    "purple": "#6d28d9",
+    "orange": "#b45309",
+    "input": "#ffffff",
+    "log_bg": "#121212",
+    "log_fg": "#e8e8e8",
+    "log_dim": "#9a9a9a",
+    "log_green": "#3fb950",
+    "log_blue": "#79b8ff",
+    "log_red": "#ff7b72",
+    "log_purple": "#d2a8ff",
 }
 
-UI_FONT = ("Microsoft YaHei UI", 9)
-TITLE_FONT = ("Microsoft YaHei UI", 13, "bold")
-HEAD_FONT = ("Microsoft YaHei UI", 10, "bold")
-LOG_FONT = ("Consolas", 10)
+if sys.platform == "darwin":
+    UI_FONT = ("PingFang SC", 13)
+    TITLE_FONT = ("PingFang SC", 17, "bold")
+    HEAD_FONT = ("PingFang SC", 13, "bold")
+    LOG_FONT = ("Menlo", 12)
+else:
+    UI_FONT = ("Microsoft YaHei UI", 9)
+    TITLE_FONT = ("Microsoft YaHei UI", 13, "bold")
+    HEAD_FONT = ("Microsoft YaHei UI", 10, "bold")
+    LOG_FONT = ("Consolas", 10)
 
 
 class MonitorApp:
@@ -3367,8 +3399,8 @@ class MonitorApp:
         self.parsed_log = SegmentedLog(self.log_root / "parsed")
 
         root.title("AFU 协议监控 (macOS)")
-        root.geometry("1500x860")
-        root.minsize(1100, 640)
+        root.geometry("1580x860")
+        root.minsize(1180, 640)
         root.configure(bg=C["bg"])
         try:
             root.lift()
@@ -3398,37 +3430,54 @@ class MonitorApp:
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure("Dark.TCombobox",
-                        fieldbackground=C["input"], background=C["btn"],
-                        foreground=C["text"], arrowcolor=C["text"],
-                        bordercolor=C["border"], lightcolor=C["border"],
-                        darkcolor=C["border"])
-        style.map("Dark.TCombobox",
-                  fieldbackground=[("readonly", C["input"])],
-                  foreground=[("readonly", C["text"])],
-                  background=[("active", C["btn_hover"])])
-        style.configure("Dark.TCheckbutton",
-                        background=C["panel"], foreground=C["text"],
-                        focuscolor=C["panel"])
-        style.map("Dark.TCheckbutton",
-                  background=[("active", C["panel"])],
-                  foreground=[("active", C["text"])])
+        style.configure(".", background=C["bg"], foreground=C["text"], font=UI_FONT)
+        specs = (
+            ("Primary.TButton", "#161616", "white", "#2a2a2a", "#161616"),
+            ("Ghost.TButton", "white", "#161616", "#f6f6f4", "#e4e4e4"),
+            ("Quiet.TButton", "#f3f3f1", "#525252", "#ececec", "#f3f3f1"),
+            ("Danger.TButton", "white", "#9f1239", "#fdf2f4", "#f3d5dc"),
+        )
+        for name, bg, fg, active, border in specs:
+            style.configure(
+                name, background=bg, foreground=fg, bordercolor=border,
+                lightcolor=border, darkcolor=border, borderwidth=1,
+                focusthickness=0, focuscolor=bg, padding=(12, 6),
+                font=UI_FONT, relief="flat")
+            style.map(
+                name,
+                background=[("active", active), ("pressed", active), ("disabled", C["bg"])],
+                foreground=[("disabled", "#c8c8c8"), ("active", fg)],
+                bordercolor=[("active", border), ("disabled", C["line"])])
+        style.configure(
+            "Tool.TCombobox", fieldbackground="white", background="white",
+            foreground=C["text"], arrowcolor=C["muted"], bordercolor=C["border"],
+            lightcolor=C["border"], darkcolor=C["border"], padding=4, arrowsize=13)
+        style.map(
+            "Tool.TCombobox",
+            fieldbackground=[("readonly", "white"), ("disabled", "#f6f6f4")],
+            foreground=[("readonly", C["text"]), ("disabled", "#c8c8c8")],
+            background=[("active", "#f6f6f4"), ("readonly", "white")])
+        for name, bg in (("Tool.TCheckbutton", C["bg"]), ("Pane.TCheckbutton", "white")):
+            style.configure(
+                name, background=bg, foreground=C["text"], focuscolor=bg,
+                font=UI_FONT, indicatormargin=4)
+            style.map(
+                name,
+                background=[("active", bg), ("selected", bg)],
+                foreground=[("active", C["text"]), ("disabled", "#c8c8c8")])
 
-    def _mk_btn(self, parent, text, command, accent=False, danger=False):
-        if accent:
-            bg, hover, fg = C["accent"], "#2ea043", "#ffffff"
-        elif danger:
-            bg, hover, fg = "#3d1f23", "#6e2c32", C["text"]
-        else:
-            bg, hover, fg = C["btn"], C["btn_hover"], C["text"]
-        btn = tk.Button(
-            parent, text=text, command=command, bg=bg, fg=fg,
-            activebackground=hover, activeforeground="#ffffff",
-            relief=tk.FLAT, bd=0, padx=12, pady=5, cursor="hand2",
-            font=UI_FONT, highlightthickness=0)
-        btn.bind("<Enter>", lambda e, b=btn, h=hover: b.config(bg=h))
-        btn.bind("<Leave>", lambda e, b=btn, o=bg: b.config(bg=o))
-        return btn
+    def _mk_btn(self, parent, text, command, kind="ghost"):
+        styles = {
+            "primary": "Primary.TButton",
+            "ghost": "Ghost.TButton",
+            "quiet": "Quiet.TButton",
+            "danger": "Danger.TButton",
+        }
+        return ttk.Button(parent, text=text, command=command, style=styles[kind], cursor="hand2")
+
+    def _set_port_button(self, text):
+        kind = "Ghost.TButton" if text == "关闭" else "Primary.TButton"
+        self._safe_config(self.btn, text=text, style=kind)
 
     def _mk_label(self, parent, text, **kw):
         opts = dict(bg=parent["bg"], fg=C["muted"], font=UI_FONT)
@@ -3436,7 +3485,7 @@ class MonitorApp:
         return tk.Label(parent, text=text, **opts)
 
     def _build_header(self):
-        header = tk.Frame(self.root, bg=C["bar"], height=48)
+        header = tk.Frame(self.root, bg=C["bar"], height=56)
         header.pack(side=tk.TOP, fill=tk.X)
         header.pack_propagate(False)
         tk.Frame(header, bg=C["blue"], width=4).pack(side=tk.LEFT, fill=tk.Y)
@@ -3447,7 +3496,8 @@ class MonitorApp:
         self.led = tk.Canvas(header, width=12, height=12, bg=C["bar"],
                              highlightthickness=0)
         self.led.pack(side=tk.RIGHT, padx=(0, 16))
-        self._led_id = self.led.create_oval(1, 1, 11, 11, fill="#484f58", outline="")
+        self._led_id = self.led.create_oval(1, 1, 11, 11, fill="#c4c4c4", outline="")
+        tk.Frame(self.root, bg=C["line"], height=1).pack(side=tk.TOP, fill=tk.X)
         self.status = tk.Label(header, text="未连接", bg=C["bar"], fg=C["muted"],
                                font=UI_FONT)
         self.status.pack(side=tk.RIGHT, padx=8)
@@ -3456,42 +3506,39 @@ class MonitorApp:
         self.count_label.pack(side=tk.RIGHT, padx=16)
 
     def _build_toolbar(self):
-        bar = tk.Frame(self.root, bg=C["panel"])
-        bar.pack(side=tk.TOP, fill=tk.X, padx=0, pady=0)
-        inner = tk.Frame(bar, bg=C["panel"])
-        inner.pack(fill=tk.X, padx=12, pady=8)
+        bar = tk.Frame(self.root, bg=C["bg"])
+        bar.pack(side=tk.TOP, fill=tk.X)
+        inner = tk.Frame(bar, bg=C["bg"])
+        inner.pack(fill=tk.X, padx=14, pady=10)
 
-        self._mk_label(inner, "串口", bg=C["panel"]).pack(side=tk.LEFT)
+        self._mk_label(inner, "端口", bg=C["bg"]).pack(side=tk.LEFT)
         self.port_var = tk.StringVar(value=self.args.port)
         self.port_combo = ttk.Combobox(inner, textvariable=self.port_var,
-                                       width=36, style="Dark.TCombobox",
+                                       width=36, style="Tool.TCombobox",
                                        font=UI_FONT)
-        self.port_combo.pack(side=tk.LEFT, padx=(6, 4))
-        self._mk_btn(inner, "刷新", self._refresh_ports).pack(side=tk.LEFT, padx=2)
+        self.port_combo.pack(side=tk.LEFT, padx=(8, 4))
+        self._mk_btn(inner, "刷新", self._refresh_ports, "ghost").pack(side=tk.LEFT, padx=2)
 
-        self._mk_label(inner, "波特率", bg=C["panel"]).pack(side=tk.LEFT, padx=(14, 0))
+        self._mk_label(inner, "波特率", bg=C["bg"]).pack(side=tk.LEFT, padx=(14, 0))
         self.baud_var = tk.StringVar(value=str(self.args.baud))
         baud = tk.Entry(inner, textvariable=self.baud_var, width=10,
-                        bg=C["input"], fg=C["text"], insertbackground=C["text"],
-                        relief=tk.FLAT, font=UI_FONT, highlightthickness=1,
-                        highlightbackground=C["border"], highlightcolor=C["blue"])
-        baud.pack(side=tk.LEFT, padx=6, ipady=4)
+                        bg="white", fg=C["text"], insertbackground=C["text"],
+                        relief=tk.FLAT, font=LOG_FONT, highlightthickness=1,
+                        highlightbackground=C["border"], highlightcolor=C["text"])
+        baud.pack(side=tk.LEFT, padx=6, ipady=5)
+        self._mk_label(inner, "8N1", bg=C["bg"], fg="#a3a3a3").pack(side=tk.LEFT, padx=(2, 8))
 
-        self.btn = self._mk_btn(inner, "打开", self.toggle, accent=True)
-        self.btn.pack(side=tk.LEFT, padx=(12, 4))
-        self._mk_btn(inner, "清空界面", self.clear).pack(side=tk.LEFT, padx=2)
-
-        sep = tk.Frame(inner, bg=C["border"], width=1)
-        sep.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=2)
+        self.btn = self._mk_btn(inner, "打开", self.toggle, "primary")
+        self.btn.pack(side=tk.LEFT, padx=(8, 4))
+        self._mk_btn(inner, "清空", self.clear, "quiet").pack(side=tk.LEFT, padx=2)
+        self._mk_btn(inner, "日志目录", self._open_log_dir, "quiet").pack(side=tk.LEFT, padx=2)
+        self._mk_btn(inner, "清除缓存", self._clear_log_cache, "danger").pack(side=tk.LEFT, padx=2)
 
         self.autoscroll = tk.BooleanVar(value=True)
-        chk = ttk.Checkbutton(inner, text="自动滚动", variable=self.autoscroll,
-                              style="Dark.TCheckbutton")
-        chk.pack(side=tk.LEFT, padx=4)
-
-        self._mk_btn(inner, "打开日志目录", self._open_log_dir).pack(side=tk.LEFT, padx=4)
-        self._mk_btn(inner, "清除日志缓存", self._clear_log_cache, danger=True).pack(
-            side=tk.LEFT, padx=2)
+        chk = ttk.Checkbutton(inner, text="跟随滚动", variable=self.autoscroll,
+                              style="Tool.TCheckbutton")
+        chk.pack(side=tk.RIGHT, padx=4)
+        tk.Frame(self.root, bg=C["line"], height=1).pack(side=tk.TOP, fill=tk.X)
 
     def _build_panes(self):
         wrap = tk.Frame(self.root, bg=C["bg"])
@@ -3503,16 +3550,19 @@ class MonitorApp:
         self.raw = self._make_pane(paned, "串口全日志", C["blue"])
         self.parsed = self._make_pane(paned, "协议解析", C["green"])
         paned.add(self.raw[0], stretch="always", minsize=360)
-        paned.add(self.parsed[0], stretch="always", minsize=360)
+        paned.add(self.parsed[0], stretch="always", minsize=420)
         self.raw_text = self.raw[1]
         self.parsed_text = self.parsed[1]
         for widget in (self.raw_text, self.parsed_text):
-            widget.tag_config("rx", foreground=C["blue"])
-            widget.tag_config("tx", foreground=C["green"])
-            widget.tag_config("err", foreground=C["red"])
-            widget.tag_config("event", foreground=C["purple"])
-            widget.tag_config("dim", foreground=C["muted"])
-            widget.tag_config("ok", foreground=C["green"])
+            widget.tag_config("rx", foreground=C["log_blue"])
+            widget.tag_config("tx", foreground=C["log_green"])
+            widget.tag_config("err", foreground=C["log_red"])
+            widget.tag_config("event", foreground=C["log_purple"])
+            widget.tag_config("dim", foreground=C["log_dim"])
+            widget.tag_config("ok", foreground=C["log_green"])
+        for tag in ("cat_app", "cat_reply", "cat_event", "cat_fw"):
+            self.parsed_text.tag_config(tag, elide=False)
+        self._build_parse_filters(self.parsed[2])
 
     def _make_pane(self, parent, title, accent):
         outer = tk.Frame(parent, bg=C["border"])
@@ -3528,22 +3578,54 @@ class MonitorApp:
         text = tk.Text(
             body, wrap=tk.NONE, font=LOG_FONT, state=tk.DISABLED,
             undo=False, autoseparators=False, maxundo=0, exportselection=False,
-            bg=C["log_bg"], fg=C["text"], insertbackground=C["text"],
+            bg=C["log_bg"], fg=C["log_fg"], insertbackground=C["log_fg"],
             selectbackground="#264f78", selectforeground="#ffffff",
             relief=tk.FLAT, bd=0, highlightthickness=0, padx=8, pady=6)
         vs = tk.Scrollbar(body, orient=tk.VERTICAL, command=text.yview,
-                          bg=C["panel"], troughcolor=C["log_bg"],
-                          activebackground=C["muted"], highlightthickness=0, bd=0)
+                          bg="#2a2a2a", troughcolor=C["log_bg"],
+                          activebackground="#3a3a3a", highlightthickness=0, bd=0)
         hs = tk.Scrollbar(body, orient=tk.HORIZONTAL, command=text.xview,
-                          bg=C["panel"], troughcolor=C["log_bg"],
-                          activebackground=C["muted"], highlightthickness=0, bd=0)
+                          bg="#2a2a2a", troughcolor=C["log_bg"],
+                          activebackground="#3a3a3a", highlightthickness=0, bd=0)
         text.configure(yscrollcommand=vs.set, xscrollcommand=hs.set)
         text._vs = vs
         text._hs = hs
         vs.pack(side=tk.RIGHT, fill=tk.Y)
         hs.pack(side=tk.BOTTOM, fill=tk.X)
         text.pack(fill=tk.BOTH, expand=True)
-        return outer, text
+        return outer, text, header
+
+    def _build_parse_filters(self, header):
+        """勾选才在右边显示该类。取消勾选只是藏起来，解析日志文件仍全量保存。"""
+        self.show_fw = tk.BooleanVar(value=True)
+        self.show_event = tk.BooleanVar(value=True)
+        self.show_reply = tk.BooleanVar(value=True)
+        self.show_app = tk.BooleanVar(value=True)
+        box = tk.Frame(header, bg="white")
+        box.pack(side=tk.RIGHT, padx=(0, 8))
+        for text, var in (
+            ("固件日志", self.show_fw),
+            ("设备上报", self.show_event),
+            ("设备回复", self.show_reply),
+            ("APP下发", self.show_app),
+        ):
+            ttk.Checkbutton(
+                box, text=text, variable=var, command=self._apply_parse_filter,
+                style="Pane.TCheckbutton",
+            ).pack(side=tk.RIGHT, padx=4)
+
+    def _apply_parse_filter(self):
+        shown = (
+            (self.show_app, "cat_app"),
+            (self.show_reply, "cat_reply"),
+            (self.show_event, "cat_event"),
+            (self.show_fw, "cat_fw"),
+        )
+        try:
+            for var, tag in shown:
+                self.parsed_text.tag_config(tag, elide=not var.get())
+        except tk.TclError:
+            return
 
     def _build_statusbar(self):
         bar = tk.Frame(self.root, bg=C["bar"], height=28)
@@ -3559,7 +3641,7 @@ class MonitorApp:
         led = C["green"] if "已连接" in text else (
             C["red"] if "失败" in text or "错误" in text or "异常" in text else (
                 C["orange"] if "锁屏" in text or "释放" in text or "休眠" in text or "重连" in text
-                else "#484f58"))
+                else "#c4c4c4"))
         try:
             self.led.itemconfig(self._led_id, fill=led)
         except tk.TclError:
@@ -3712,7 +3794,7 @@ class MonitorApp:
         self.running = True
         set_keep_awake(True)
         if not self._session_paused:
-            self._safe_config(self.btn, text="关闭")
+            self._set_port_button("关闭")
             self._set_status(f"已连接 {self.port_var.get()} @ {self.baud_var.get()}", C["green"])
         self._rotate_segment("open" if reason == "打开" else "reconnect")
         if reason != "打开":
@@ -3737,7 +3819,7 @@ class MonitorApp:
         if not keep_hold:
             set_keep_awake(False)
         if touch_ui and not self._session_paused:
-            self._safe_config(self.btn, text="关闭" if keep_hold else "打开")
+            self._set_port_button("关闭" if keep_hold else "打开")
             if not keep_hold:
                 self._set_status("未连接", C["muted"])
         self.serial_log.flush()
@@ -4005,11 +4087,13 @@ class MonitorApp:
         block.extend(f"    {ln}" for ln in lines)
         block.append("")
         if parsed_batch is not None:
-            parsed_batch.append((block[0], level))
-            parsed_batch.append((block[1], "dim"))
+            head_tags = view_tags(level, summary)
+            dim_tags = view_tags("dim", summary)
+            parsed_batch.append((block[0], head_tags))
+            parsed_batch.append((block[1], dim_tags))
             for ln in lines:
-                parsed_batch.append((f"    {ln}", level))
-            parsed_batch.append(("", level))
+                parsed_batch.append((f"    {ln}", head_tags))
+            parsed_batch.append(("", head_tags))
         self.parsed_log.write("\n".join(block))
 
     def _dispatch_kind(self, ts, text, kind, parsed_batch, track=True):
