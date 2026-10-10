@@ -144,6 +144,7 @@ FACT_TYPES = {
     0x20: "HEART_RATE(心率)", 0x21: "RESTING_HR(静息心率)", 0x22: "HRV",
     0x23: "BOXYGEN(血氧)", 0x24: "STRESS(压力)", 0x25: "BREATH_RATE(呼吸)",
     0x30: "ACTIVE_HOURS", 0x31: "BODY_TEMP(体温)",
+    0x32: "EXERCISE_DURATION(锻炼时长)",
 }
 POWER_MODES = {0: "NORMAL", 1: "POWER_SAVE(省电)", 2: "FLIGHT(飞行)", 3: "SHIP(运输)"}
 FIND_END_REASONS = {0: "STOPPED(手动停止)", 1: "TIMEOUT(超时结束)", 2: "INTERNAL_ERROR(内部错误)"}
@@ -254,7 +255,7 @@ FACT_CN = {
     0x10: "睡眠汇总", 0x11: "睡眠阶段", 0x12: "入睡", 0x13: "出睡",
     0x20: "心率", 0x21: "静息心率", 0x22: "心率变异性",
     0x23: "血氧", 0x24: "压力", 0x25: "呼吸",
-    0x30: "活跃小时", 0x31: "体温",
+    0x30: "活跃小时", 0x31: "体温", 0x32: "锻炼时长",
 }
 SLEEP_STAGE_CN = {0: "清醒", 1: "REM", 2: "浅睡", 3: "深睡"}
 SLEEP_TYPE_CN = {0: "未知", 1: "科学睡眠", 2: "小睡"}
@@ -363,6 +364,10 @@ def health_value(ftype, body):
     if ftype == 0x31 and len(body) >= 10:
         temp = i16(body, 8)
         val = "无值" if temp == -32768 else f"{temp / 10:.1f}℃"
+        return name, f"{time_span(u32(body, 0), u32(body, 4))}  {val}"
+    if ftype == 0x32 and len(body) >= 12:
+        dur = u32(body, 8)
+        val = "无值" if dur == 0xFFFFFFFF else f"{dur}秒"
         return name, f"{time_span(u32(body, 0), u32(body, 4))}  {val}"
     return name, "未能读出数值"
 
@@ -3242,6 +3247,7 @@ class SegmentedLog:
         self.started = 0.0
         self.written = 0
         self._pending = 0
+        self._dirty_at = 0.0
         self._lock = threading.Lock()
 
     def set_segment(self, stamp: str):
@@ -3258,6 +3264,7 @@ class SegmentedLog:
         except OSError:
             self.written = 0
         self._pending = 0
+        self._dirty_at = 0.0
 
     def write(self, line: str):
         with self._lock:
@@ -3266,10 +3273,13 @@ class SegmentedLog:
             if not line.endswith("\n"):
                 line += "\n"
             try:
+                if self._pending == 0:
+                    self._dirty_at = time.monotonic()
                 self.fp.write(line)
                 self.written += len(line.encode("utf-8"))
                 self._pending += 1
-                if self._pending >= 40:
+                # 高速刷屏时按块合并；安静下来由读线程和界面定时把尾巴写出去。
+                if self._pending >= 48:
                     self._flush()
             except OSError:
                 pass
@@ -3278,6 +3288,12 @@ class SegmentedLog:
         with self._lock:
             self._flush()
 
+    def flush_if_due(self, max_age=0.05):
+        """还有没落盘的内容，并且已经过了这一小段时间，就写出去。"""
+        with self._lock:
+            if self._pending and (time.monotonic() - self._dirty_at) >= max_age:
+                self._flush()
+
     def _flush(self):
         if self.fp:
             try:
@@ -3285,6 +3301,7 @@ class SegmentedLog:
             except OSError:
                 pass
             self._pending = 0
+            self._dirty_at = 0.0
 
     def close(self):
         with self._lock:
@@ -3841,17 +3858,23 @@ class MonitorApp:
                 if not data:
                     continue
                 buf += data
+                wrote = False
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
                     ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
                     text = line.decode("utf-8", "replace").rstrip("\r")
                     self._ingest_line(ts, text)
+                    wrote = True
+                if wrote:
+                    self.serial_log.flush()
         finally:
             if buf:
                 ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
                 text = buf.decode("utf-8", "replace").rstrip("\r")
                 if text:
                     self._ingest_line(ts, text)
+            self.serial_log.flush()
+            self.parsed_log.flush()
 
     def _open_file(self, path):
         self._set_status(f"离线回放: {path}", C["blue"])
@@ -4014,6 +4037,8 @@ class MonitorApp:
             except Exception:
                 pass
         try:
+            self.serial_log.flush_if_due()
+            self.parsed_log.flush_if_due()
             ui_pending = (not self.queue.empty()) or (not self.parsed_ui_q.empty())
             if self._see_pending and not ui_pending:
                 self._catch_up_scroll()
@@ -4095,6 +4120,7 @@ class MonitorApp:
                 parsed_batch.append((f"    {ln}", head_tags))
             parsed_batch.append(("", head_tags))
         self.parsed_log.write("\n".join(block))
+        self.parsed_log.flush()
 
     def _dispatch_kind(self, ts, text, kind, parsed_batch, track=True):
         if kind == "fw":
@@ -4284,6 +4310,13 @@ def check_offline_nodata_wording():
     metric, text = health_value(0x20, body)
     if metric != "心率" or "11:05:30" not in text or "11:10:30" not in text or "周期300秒" not in text or "81bpm" not in text:
         raise RuntimeError(f"period hr: {metric} {text}")
+    dur = (0x6AC3C980).to_bytes(4, "little") + (0x6AC3D790).to_bytes(4, "little") + (0).to_bytes(4, "little")
+    metric, text = health_value(0x32, dur)
+    if metric != "锻炼时长" or "10-06 00:00" not in text or "10-06 01:00" not in text or "0秒" not in text:
+        raise RuntimeError(f"exercise duration: {metric} {text}")
+    metric, text = health_value(0x32, dur[:8] + b"\xff\xff\xff\xff")
+    if metric != "锻炼时长" or "无值" not in text:
+        raise RuntimeError(f"exercise duration empty: {metric} {text}")
 
 
 def check_exercise_chunks():
