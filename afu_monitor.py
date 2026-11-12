@@ -36,21 +36,23 @@ from tkinter import messagebox, ttk
 DOMAINS = {
     0x01: "SYSTEM(系统)", 0x10: "OFFLINE(离线同步)", 0x20: "MEASUREMENT(主动测量)",
     0x30: "DEBUG_RAW_PPG(内部)", 0x40: "DEBUG(内部)", 0x50: "DEVICE_CONTROL(设备控制)",
-    0x60: "FILE(内部)", 0x70: "EXERCISE(运动)", 0xF0: "FACTORY(厂测)",
+    0x60: "FILE(文件)", 0x70: "EXERCISE(运动)", 0xF0: "FACTORY(厂测)",
 }
-# 第10/11/13节：已占用但暂不公布 opcode。消费者固件不得实现，capability 位必须为 0。
+# 第10/11节：已占用但暂不公布 opcode。消费者固件不得实现，capability 位必须为 0。
+# 第13节 FILE 已是公开可选域。
 UNPUBLISHED_DOMAINS = {
     0x30: ("DEBUG_RAW_PPG", "第10节"),
     0x40: ("DEBUG", "第11节"),
-    0x60: ("FILE", "第13节"),
 }
 
 OPCODES = {
     0x01: {0x01: "GET_CAPABILITIES", 0x02: "GET_DEVICE_SIGNATURE", 0x03: "GET_BATTERY",
            0x04: "TIME_SYNC", 0x05: "GET_DEVICE_INFO", 0x06: "GET_USER_PROFILE",
-           0x07: "SET_USER_PROFILE", 0x10: "AUTH_GET_CHALLENGE", 0x11: "AUTH_SET_KEY",
+           0x07: "SET_USER_PROFILE", 0x08: "GET_IDENTITY_CREDENTIAL",
+           0x09: "GET_ACTION_READINESS", 0x10: "AUTH_GET_CHALLENGE", 0x11: "AUTH_SET_KEY",
            0x12: "AUTH_PROVE", 0x20: "USER_RESET", 0x21: "SOFTWARE_REBOOT",
-           0x40: "BATTERY_STATE_EVENT", 0x41: "LOG_EVENT"},
+           0x22: "USER_DATA_RESET",
+           0x40: "BATTERY_STATE_EVENT", 0x41: "LOG_EVENT", 0x42: "TELEMETRY_EVENT"},
     0x10: {0x01: "OFFLINE_OPEN", 0x02: "OFFLINE_PULL", 0x03: "OFFLINE_CLOSE",
            0x40: "OFFLINE_DATA"},
     0x20: {0x01: "START", 0x02: "STOP", 0x03: "GET_STATE",
@@ -60,8 +62,19 @@ OPCODES = {
            0x04: "GET_BLE_NAME", 0x05: "SET_BLE_NAME", 0x06: "GET_POWER_MODE",
            0x07: "SET_POWER_MODE", 0x08: "GET_WEAR_STATE", 0x09: "GET_IBEACON_CONFIG",
            0x0A: "SET_IBEACON_CONFIG", 0x0B: "GET_SLEEP_STATE",
+           0x0C: "GET_REMINDER_CAPABILITIES", 0x0D: "GET_HEALTH_ALERT_CONFIG",
+           0x0E: "SET_HEALTH_ALERT_CONFIG", 0x0F: "GET_ALARM_CONFIG",
+           0x10: "UPDATE_ALARM_CONFIG", 0x11: "DELETE_ALARM",
+           0x12: "REMIND_NOW", 0x13: "REMIND_STOP", 0x14: "ALARM_STOP",
+           0x15: "GET_VIBRATION_TEMPLATE", 0x16: "SET_VIBRATION_TEMPLATE",
+           0x17: "CREATE_ALARM_CONFIG", 0x18: "GET_ALARM_LIST",
            0x40: "CASE_BATTERY_EVENT", 0x41: "WEAR_STATE_EVENT",
-           0x42: "FIND_END_EVENT", 0x43: "SLEEP_STATE_EVENT"},
+           0x42: "FIND_END_EVENT", 0x43: "SLEEP_STATE_EVENT",
+           0x44: "REMINDER_TRIGGERED"},
+    0x60: {0x01: "PULL_OPEN", 0x02: "PULL_READ", 0x03: "PULL_CLOSE",
+           0x04: "STREAM_OPEN", 0x05: "STREAM_CONTINUE", 0x06: "STREAM_STOP",
+           0x10: "PUSH_OPEN", 0x11: "PUSH_WRITE", 0x12: "PUSH_COMMIT", 0x13: "PUSH_ABORT",
+           0x40: "STREAM_DATA", 0x41: "STREAM_END"},
     0x70: {0x01: "GET_CAPABILITIES", 0x02: "GET_STATE", 0x03: "GET_RECOGNITION_CONFIG",
            0x04: "SET_RECOGNITION_CONFIG", 0x05: "CONFIG_REALTIME_EXTENSION",
            0x06: "GET_REALTIME_EXTENSION_CAPABILITIES", 0x10: "START", 0x11: "PAUSE",
@@ -78,6 +91,16 @@ STATUS = {
     8: "MTU_TOO_SMALL", 9: "FORBIDDEN", 10: "NO_DATA", 11: "INTERNAL_ERROR",
     12: "DURATION_TOO_LONG", 13: "DISABLED", 14: "NOT_WORN",
     15: "CHECKSUM_MISMATCH", 16: "NO_SPACE", 17: "IDEMPOTENCY_CAPACITY_FULL",
+    18: "TEMPLATE_NOT_CONFIGURED", 19: "TEMPLATE_ID_NOT_SUPPORTED",
+    20: "REMINDER_CHANNEL_NOT_SUPPORTED", 21: "METRIC_NOT_SUPPORTED",
+    22: "ALARM_MODE_NOT_SUPPORTED", 23: "ALARM_NOT_FOUND",
+    24: "ALARM_NOT_ACTIVE", 25: "ALARM_EVENT_MISMATCH",
+    26: "REMINDER_NOT_ACTIVE", 27: "REMINDER_ID_MISMATCH",
+    28: "REMINDER_RESOURCE_BUSY", 29: "VIBRATION_DRIVER_UNAVAILABLE",
+    30: "LED_DRIVER_UNAVAILABLE", 31: "BUZZER_DRIVER_UNAVAILABLE",
+    32: "CONFIG_STORAGE_UNAVAILABLE", 33: "CONFIG_READ_FAILED",
+    34: "CONFIG_WRITE_FAILED", 35: "REMINDER_NO_OUTPUT",
+    36: "ACTION_NOT_SUPPORTED", 37: "ALARM_CAPACITY_FULL",
 }
 STATUS_USAGE = {
     0: "成功/已受理",
@@ -98,6 +121,26 @@ STATUS_USAGE = {
     15: "数据校验不匹配",
     16: "存储或固定资源不足",
     17: "首次操作因幂等结果容量不足而未受理；未执行业务副作用",
+    18: "震动模板编号受支持，但当前没有参数",
+    19: "固件不支持请求或引用的模板编号",
+    20: "请求选择了本机不支持的提醒通道",
+    21: "未实现请求的异常提醒指标",
+    22: "闹钟模式值已定义，但本机未实现",
+    23: "查询或更新所指的闹钟不存在",
+    24: "请求的闹钟当前没有正在执行的响铃",
+    25: "闹钟正在响铃，但请求事件编号不属于本轮",
+    26: "当前没有活动的立即提醒",
+    27: "当前有活动立即提醒，但请求编号不匹配",
+    28: "已有查找会话或其他提醒占用输出资源",
+    29: "本机支持震动，但震动驱动当前不可用",
+    30: "本机支持灯光，但灯光驱动当前不可用",
+    31: "本机支持蜂鸣器，但蜂鸣器驱动当前不可用",
+    32: "配置存储服务当前无法提供读写",
+    33: "存储服务已提供读取，但本次配置读取失败",
+    34: "本次配置原子持久化失败，旧配置保持有效",
+    35: "所选通道均无有效输出",
+    36: "状态查询已实现，但请求的目标动作或测量类型未实现",
+    37: "创建时已保存数量达到闹钟容量上限",
 }
 
 FLAG_BITS = [(0x01, "RESPONSE"), (0x02, "EVENT"), (0x04, "FRAGMENT"),
@@ -135,9 +178,11 @@ END_REASONS = {0: "NONE", 1: "USER_STOP(用户结束)", 2: "AUTO_LOW_ACTIVITY(�
                3: "AUTO_NOT_WORN(未佩戴)", 4: "AUTO_CONTINUOUS_INACTIVE(持续静止)",
                5: "CHARGING_STARTED(进入充电)", 6: "LOW_BATTERY(低电)",
                7: "DEVICE_RESTART(设备重启)", 8: "SENSOR_FAILURE(传感器故障)",
-               9: "STORAGE_LIMIT(存储上限)", 10: "MAX_DURATION(时长上限)"}
+               9: "STORAGE_LIMIT(存储上限)", 10: "MAX_DURATION(时长上限)",
+               11: "PREEMPTED_BY_OTA(被OTA打断)", 12: "PREEMPTED_BY_MEASUREMENT(被主动测量打断)"}
 DATASETS = {1: "HEALTH_HISTORY(健康)", 2: "ALGORITHM_INTERMEDIATE(算法中间)",
-            3: "DIAGNOSTIC(诊断)", 4: "EXERCISE_HISTORY(运动记录)"}
+            3: "DIAGNOSTIC(诊断)", 4: "EXERCISE_HISTORY(运动记录)",
+            5: "DEVICE_EVENT_HISTORY(设备事件)"}
 FACT_TYPES = {
     0x01: "STEPS(步数)", 0x02: "CALORIES(卡路里)",
     0x10: "SLEEP_SUMMARY", 0x11: "SLEEP_STAGE", 0x12: "SLEEP_ONSET", 0x13: "SLEEP_WAKEUP",
@@ -160,9 +205,50 @@ CAPS_DOMAIN_BITS = [
     (3, "DEBUG_RAW_PPG", "内部PPG", False),
     (4, "DEBUG", "内部调试", False),
     (5, "DEVICE_CONTROL", "设备控制", True),
-    (6, "FILE", "内部文件", False),
+    (6, "FILE", "文件", True),
     (7, "EXERCISE", "运动", True),
 ]
+ACTION_TYPES = {1: "OTA", 2: "ACTIVE_MEASUREMENT(主动测量)", 3: "REBOOT(重启)"}
+ACTION_READINESS = {0: "READY(可执行)", 1: "PREEMPT_REQUIRED(需先收尾)", 2: "BLOCKED(阻塞)"}
+INTERRUPTIBLE_BITS = [(0, "运动(含等待确认/暂停)"), (1, "周期测量")]
+BLOCKING_BITS = [
+    (0, "不可中断的reset/存储提交"), (1, "OTA进行中"), (2, "主动测量占用"),
+    (3, "已确认未佩戴"), (4, "佩戴未知或过期"), (5, "电量不足"),
+    (6, "功耗/生命周期禁止"), (7, "依赖未就绪"),
+]
+CREDENTIAL_ERRORS = {0x00: "其他内部错误", 0x01: "存储读取失败", 0x02: "记录损坏或正文长度非法"}
+HAPTIC_MODES = {0: "NONE(无)", 1: "TEMPLATE(模板)", 2: "CUSTOM(自定义)"}
+PATTERN_IDS = {0: "未选", 1: "A", 2: "B", 3: "C"}
+REMINDER_FEATURE_BITS = [
+    (0, "异常提醒"), (1, "闹钟"), (2, "立即提醒"), (3, "查找模式"), (4, "震动模板查询与设置"),
+]
+ALARM_MODE_BITS = [(0, "定时FIXED"), (1, "浅睡LIGHT_SLEEP")]
+ALERT_METRICS = {1: "HR(心率BPM)", 2: "SPO2(血氧%)", 3: "BATTERY(电量%)"}
+ALERT_CONTEXTS = {0: "ANY(任意)", 1: "NON_EXERCISE(非运动)", 2: "EXERCISE(运动中)"}
+ALERT_RUNTIME = {0: "DISABLED(关闭)", 1: "MONITORING(监测中)", 2: "SUSPENDED(暂停)",
+                 3: "NOT_READY(未就绪)"}
+ALARM_MODES = {1: "FIXED(定时)", 2: "LIGHT_SLEEP(浅睡)"}
+# 1106：提醒事件原因 1..10；不再使用 1030 的“其他=5”兜底
+REMINDER_REASONS = {
+    1: "闹钟", 2: "健康异常", 3: "低电", 4: "查找设备", 5: "立即提醒",
+    6: "设备绑定", 7: "开关机及重启", 8: "运动相关", 9: "充电", 10: "固件升级结果",
+}
+REMINDER_REASON_CODES = {
+    1: {1: "定时/到点兜底", 2: "浅睡窗口内触发"},
+    2: {1: "低于下限", 2: "高于上限"},
+    3: {1: "原低电提醒", 2: "电量低于20%", 3: "电量低于10%"},
+    4: {1: "客户端发起"},
+    5: {1: "客户端发起"},
+    6: {1: "绑定成功"},
+    7: {1: "重启", 2: "关机", 3: "开机"},
+    8: {1: "开始运动", 2: "结束运动", 3: "暂停运动", 4: "运动中蓝牙断连"},
+    9: {1: "开始充电", 2: "充满", 3: "停止充电"},
+    10: {1: "升级成功", 2: "升级失败"},
+}
+DEVICE_EVENT_TYPES = {1: "REMINDER_TRIGGERED(提醒触发)"}
+WEEKDAY_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+FILE_END_REASONS = {0: "COMPLETED(完成)", 1: "STOPPED(停止)", 2: "READ_ERROR(读失败)",
+                    3: "SEND_ERROR(发送失败)", 4: "SNAPSHOT_INVALID(快照无效)"}
 CAPS_MEAS_BITS = [
     (0, "HR", "心率"),
     (1, "HRV", "心率变异性"),
@@ -613,6 +699,11 @@ def decode_offline_records(dataset, page: bytes):
         elif dataset == 3:
             item["kind"] = "diag"
             item["text"] = diagnostic_payload_text(raw)
+        elif dataset == 5:
+            metric, text = device_event_offline_text(raw)
+            item["kind"] = "value"
+            item["metric"] = metric
+            item["text"] = text
         elif dataset == 4:
             info = exercise_chunk_info(raw)
             if info and info["count"] == 2:
@@ -684,7 +775,7 @@ def format_offline_page_lines(dataset, page_id, page, holes, meta, ex_pending=No
                 lines.append(ln)
         else:
             lines.append("(无可用文本)")
-    elif dataset in (1, 4):
+    elif dataset in (1, 4, 5):
         groups = {}
         order = []
         for r in recs:
@@ -1041,7 +1132,7 @@ def format_status(st):
     name = STATUS.get(st)
     usage = STATUS_USAGE.get(st)
     if name is None:
-        return f"status=未知  值={st}(0x{st:02X})  不在协议第5.2节（0..17）"
+        return f"status=未知  值={st}(0x{st:02X})  不在协议第5.2节（0..37）"
     return f"status={name}  值={st}(0x{st:02X})  使用场景：{usage}"
 
 
@@ -1060,7 +1151,7 @@ def status_summary(st):
 def caps_check(p):
     """解析 GET_CAPABILITIES 成功响应。返回 (info, issues)。payload 含 status。"""
     info = {
-        "domains": [], "meas": [], "user_reset": False,
+        "domains": [], "meas": [], "user_reset": False, "user_data_reset": False,
         "lesc": False, "auth": False, "extpwr": False, "privacy": False,
         "max_frame": 0, "max_page": 0, "min_mtu": 0,
     }
@@ -1086,16 +1177,17 @@ def caps_check(p):
         issues.append(f"domain_mask 含未定义位 0x{leftover_dom:04X}，须为 0")
     if dm & internal_mask:
         issues.append(
-            f"内部域位必须为 0（DEBUG_RAW_PPG/DEBUG/FILE），实际 domain_mask=0x{dm:04X}")
+            f"内部域位必须为 0（DEBUG_RAW_PPG/DEBUG），实际 domain_mask=0x{dm:04X}")
     leftover_meas = mm & ~0x001F
     if leftover_meas:
         issues.append(f"measurement_mask 含保留位 0x{leftover_meas:04X}，须为 0")
     for bit, _en, cn in CAPS_MEAS_BITS:
         if mm & (1 << bit):
             info["meas"].append(cn)
-    if maint & ~0x01:
-        issues.append(f"maintenance_mask 仅 bit0=USER_RESET，其余须 0，实际 0x{maint:02X}")
+    if maint & ~0x03:
+        issues.append(f"maintenance_mask 仅 bit0=USER_RESET、bit1=USER_DATA_RESET，实际 0x{maint:02X}")
     info["user_reset"] = bool(maint & 0x01)
+    info["user_data_reset"] = bool(maint & 0x02)
     info["lesc"] = bool(sf & 0x01)
     info["auth"] = bool(sf & 0x02)
     info["extpwr"] = bool(sf & 0x04)
@@ -1126,6 +1218,7 @@ def s_caps_resp(p):
         "测量：" + ("、".join(info["meas"]) if info["meas"] else "无"),
     ]
     parts.append("可恢复出厂" if info["user_reset"] else "不支持恢复出厂")
+    parts.append("可清除用户数据" if info["user_data_reset"] else "不支持清除用户数据")
     need = []
     if info["lesc"]:
         need.append("LESC")
@@ -1162,6 +1255,8 @@ def p_caps_resp(p, out):
             extra = ""
             if bit == 1 and on:
                 extra = "（至少一种离线数据集，不是全部）"
+            elif bit == 6 and on:
+                extra = "（至少一种文件方向，不是全部路径）"
             state = "已声明" if on else "未声明"
         else:
             state = "已声明（非法）" if on else "未声明（消费者固件必须为0）"
@@ -1180,7 +1275,9 @@ def p_caps_resp(p, out):
         out.append(f"  保留位 = 0x{leftover_meas:04X}（必须为0）")
     out.append(f"maintenance_mask=0x{maint:02X}  USER_RESET="
                + ("支持恢复出厂设置" if info["user_reset"] else "不支持")
-               + ("" if (maint & ~0x01) == 0 else f"  其余位0x{maint & ~0x01:02X}非法"))
+               + "  USER_DATA_RESET="
+               + ("支持清除用户数据(保留Bond/IRK)" if info["user_data_reset"] else "不支持")
+               + ("" if (maint & ~0x03) == 0 else f"  其余位0x{maint & ~0x03:02X}非法"))
     out.append(f"security_flags=0x{sf:02X}")
     for bit, en, cn in CAPS_SEC_BITS:
         on = bool(sf & (1 << bit))
@@ -1783,10 +1880,14 @@ def p_case_battery(p, out, base=0):
 
 
 def p_find_start_req(p, out):
-    if len(p) < 3:
-        out.append("!! FIND_START请求过短"); return
-    sigs = [n for bit, n in [(0, "LED"), (1, "振动"), (2, "蜂鸣器")] if p[0] & (1 << bit)]
-    out.append(f"signal_mask=0x{p[0]:02X}({'/'.join(sigs) if sigs else '设备默认'})  时长={u16(p, 1)}s")
+    if len(p) != 6:
+        out.append(f"!! FIND_START请求须固定6字节，实际{len(p)}（不接受3字节或15字节旧请求）")
+        return
+    out.append(format_reminder_ref(p[0:4]))
+    dur = u16(p, 4)
+    out.append(f"duration_s={dur}" + ("（设备默认时长）" if dur == 0 else ""))
+    if p[0] == 0:
+        out.append("!! 查找必须选择至少一个通道")
 
 
 def p_find_start_resp(p, out):
@@ -2126,27 +2227,67 @@ def p_set_ble_name_resp(p, out):
                f"生效名称({n}字节)=\"{bytes(p[6:6 + n]).decode('utf-8', 'replace')}\"")
 
 
-def p_log_event(p, out):
+LOG_LEVELS = {1: "ERROR(错误)", 2: "WARN(警告)", 3: "INFO(信息)", 4: "DEBUG(调试)"}
+LOG_EVENT_MEANINGS = {
+    ("AUTH_PROVE", "app auth ok"): (
+        "应用认证已通过",
+        "对应 SYSTEM/AUTH_PROVE(0x12)。成功后当前连接进入已认证，才能使用受保护的业务指令",
+    ),
+    ("AFU_TIME", "time sync ok"): (
+        "校时已成功",
+        "对应 SYSTEM/TIME_SYNC(0x04)。设备已更新时间；新认证会话在离线同步和主动测量前必须先完成校时",
+    ),
+    ("SOFTWARE_REBOOT", "reboot now"): (
+        "即将软件重启",
+        "对应 SYSTEM/SOFTWARE_REBOOT(0x21)。只做普通重启，不清除用户数据、配置、AuthKey 和绑定",
+    ),
+}
+
+
+def log_event_parts(p):
+    """LOG_EVENT：16 字节头 + source_ascii + message_utf8。"""
     if len(p) < 16:
-        out.append(f"!! LOG_EVENT 头须 16 字节，实际 {len(p)}"); return
+        return None
     slen, mlen = p[13], u16(p, 14)
-    src = bytes(p[16:16 + slen])
-    msg = bytes(p[16 + slen:16 + slen + mlen])
-    ts = u64(p, 4)
-    out.append(f"log_seq={u32(p, 0)}  时间={'无有效UTC' if ts == 0 else ms_to_str(ts)}  "
-               f"level={LOG_LEVELS.get(p[12], p[12])}")
-    out.append(f"source=\"{src.decode('ascii', 'replace')}\"")
-    out.append(f"message=\"{msg.decode('utf-8', 'replace')}\"")
+    src = bytes(p[16:16 + slen]).decode("ascii", "replace")
+    msg = bytes(p[16 + slen:16 + slen + mlen]).decode("utf-8", "replace")
+    return u32(p, 0), u64(p, 4), p[12], slen, mlen, src, msg
+
+
+def s_log_event(p):
+    parts = log_event_parts(p)
+    if not parts:
+        return ""
+    _seq, _ts, _level, _slen, _mlen, src, msg = parts
+    known = LOG_EVENT_MEANINGS.get((src, msg))
+    return known[0] if known else msg[:40]
+
+
+def p_log_event(p, out):
+    parts = log_event_parts(p)
+    if not parts:
+        out.append(f"!! LOG_EVENT 头须 16 字节，实际 {len(p)}")
+        return
+    seq, ts, level, slen, mlen, src, msg = parts
+    known = LOG_EVENT_MEANINGS.get((src, msg))
+    if known:
+        out.append(f"含义: {known[0]}。{known[1]}")
+        out.append("说明: 这是 SYSTEM/LOG_EVENT(0x41) 运行日志，不是该指令的响应帧；best-effort，不要求应答")
+    out.append(f"log_seq={seq}  时间={'无有效UTC' if ts == 0 else ms_to_str(ts)}  "
+               f"level={LOG_LEVELS.get(level, level)}")
+    out.append(f"source=\"{src}\"({slen}字节)")
+    out.append(f"message=\"{msg}\"({mlen}字节)")
+    if slen > 16 or mlen > 180:
+        out.append("!! source_len 须≤16，message_len 须≤180")
     if 16 + slen + mlen != len(p):
         out.append(f"!! 长度应为 16+{slen}+{mlen}={16 + slen + mlen}，实际 {len(p)}")
 
 
-SWIM_STROKES = {0: "未知", 1: "自由泳", 2: "蛙泳", 3: "混合"}
-LOG_LEVELS = {1: "ERROR", 2: "WARN", 3: "INFO", 4: "DEBUG"}
-
-
 def _x100(v):
     return f"{v / 100:.2f}"
+
+
+SWIM_STROKES = {0: "未知", 1: "自由泳", 2: "蛙泳", 3: "混合"}
 
 
 def realtime_metric_parts(p):
@@ -2297,6 +2438,868 @@ def p_generic_op_resp(p, out):
         out.append(f"operation_id=0x{u32(p, 1):08X}")
 
 
+def p_user_data_reset_resp(p, out):
+    p_generic_op_resp(p, out)
+    if p and p[0] == 0:
+        out.append("说明: OK只表示已受理，后台清理未完成；保留Bond、IRK和生产身份")
+
+
+def crc16_ccitt_false(data):
+    """CRC-16/CCITT-FALSE，与健康记录相同：poly=0x1021，init=0xFFFF，xorout=0。"""
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = ((crc << 1) ^ 0x1021) & 0xFFFF
+            else:
+                crc = (crc << 1) & 0xFFFF
+    return crc
+
+
+def _status_ok(p, out):
+    if not p:
+        out.append("!! 空响应")
+        return False
+    if p[0] != 0:
+        if len(p) > 1:
+            out.append(f"!! 失败响应应只有 status，实际 {len(p)} 字节")
+        return False
+    return True
+
+
+def bit_names(mask, table):
+    names = [name for bit, name in table if mask & (1 << bit)]
+    return "/".join(names) if names else "无"
+
+
+def read_haptic(p, o):
+    if len(p) < o + 10:
+        return None
+    return {
+        "mode": p[o], "template": p[o + 1], "on": u16(p, o + 2), "off": u16(p, o + 4),
+        "n": p[o + 6], "g": p[o + 7], "gap": u16(p, o + 8),
+    }
+
+
+def format_haptic(hp):
+    mode = name_of(HAPTIC_MODES, hp["mode"])
+    if hp["mode"] == 0:
+        return mode
+    if hp["mode"] == 1:
+        return f"{mode} {name_of(PATTERN_IDS, hp['template'])}"
+    return (f"{mode} on={hp['on']}ms off={hp['off']}ms N={hp['n']} G={hp['g']} gap={hp['gap']}ms")
+
+
+def haptic_issues(hp):
+    issues = []
+    mode = hp["mode"]
+    if mode == 0:
+        if any((hp["template"], hp["on"], hp["off"], hp["n"], hp["g"], hp["gap"])):
+            issues.append("NONE 时其余字段须全 0")
+    elif mode == 1:
+        if hp["template"] not in (1, 2, 3):
+            issues.append(f"模板编号 {hp['template']} 须为 A/B/C")
+        if any((hp["on"], hp["off"], hp["n"], hp["g"], hp["gap"])):
+            issues.append("TEMPLATE 只填 template_id，其余须为 0")
+    elif mode == 2:
+        if hp["template"] != 0:
+            issues.append("CUSTOM 的 template_id 须为 0")
+        if not (1 <= hp["on"] <= 5000):
+            issues.append(f"on_ms 须为 1..5000，实际 {hp['on']}")
+        if hp["off"] > 60000 or hp["gap"] > 60000:
+            issues.append("off_ms/group_gap_ms 须为 0..60000")
+        if not (1 <= hp["n"] <= 20 and 1 <= hp["g"] <= 20):
+            issues.append("repeat_count/group_count 须为 1..20")
+    else:
+        issues.append(f"未知震动模式 {mode}")
+    return issues
+
+
+def emit_haptic(p, o, out, label):
+    hp = read_haptic(p, o)
+    if hp is None:
+        out.append(f"!! {label} 不足 10 字节")
+        return None
+    out.append(f"{label}: {format_haptic(hp)}")
+    for item in haptic_issues(hp):
+        out.append(f"!! {item}")
+    return o + 10
+
+
+def weekday_text(mask):
+    low = mask & 0x7F
+    if low == 0x7F:
+        base = "每天"
+    elif low == 0x1F:
+        base = "工作日"
+    elif low == 0x60:
+        base = "周末"
+    else:
+        base = "/".join(WEEKDAY_NAMES[i] for i in range(7) if low & (1 << i)) or "无"
+    extra = "，bit7保留须为0" if mask & 0x80 else ""
+    return f"0x{mask:02X}({base}{extra})"
+
+
+def reason_code_text(reason, code):
+    named = REMINDER_REASON_CODES.get(reason, {}).get(code)
+    if named:
+        return f"{code}={named}"
+    return f"0x{code:04X}（未知扩展，保留原值）"
+
+
+def format_reminder_ref(rem):
+    """1106 公共提醒结构 4 字节：通道位图 + 三个模板编号。"""
+    if len(rem) < 4:
+        return "提醒结构不足4字节"
+    mask = rem[0]
+    chans = [n for bit, n in [(0, "灯光"), (1, "震动"), (2, "蜂鸣器")] if mask & (1 << bit)]
+    parts = [f"signal_mask=0x{mask:02X}({'/'.join(chans) if chans else '无通道'})"]
+    parts.append(f"震动模板={rem[1] or '未选'}")
+    parts.append(f"灯光模板={rem[2] or '未选'}")
+    parts.append(f"蜂鸣器模板={rem[3] or '未选'}")
+    if mask & ~0x07:
+        parts.append(f"!! 保留位0x{mask & ~0x07:02X}")
+    return "  ".join(parts)
+
+
+def p_identity_resp(p, out):
+    if not p:
+        out.append("!! 空响应")
+        return
+    if p[0] != 0:
+        if p[0] == 11:
+            if len(p) == 2:
+                out.append(f"credential_error=0x{p[1]:02X}（{name_of(CREDENTIAL_ERRORS, p[1])}）")
+            else:
+                out.append(f"!! INTERNAL_ERROR 须为 status+credential_error 共2字节，实际{len(p)}")
+        elif len(p) != 1:
+            out.append(f"!! 失败响应应只有 status，实际{len(p)}字节")
+        return
+    if len(p) < 4:
+        out.append("!! 成功响应不足4字节")
+        return
+    length = u16(p, 2)
+    blob = bytes(p[4:4 + length])
+    out.append(f"encoding_type=0x{p[1]:02X}（保留标识，不转换正文）")
+    out.append(f"credential_length={length}")
+    out.append(f"credential_text=\"{blob.decode('utf-8', 'replace')}\"")
+    if not (1 <= length <= 128):
+        out.append("!! credential_length 须为 1..128")
+    if len(p) != 4 + length:
+        out.append(f"!! 成功payload须为4+L={4 + length}，实际{len(p)}")
+    if len(blob) != length:
+        out.append("!! 正文被截断")
+
+
+def p_action_req(p, out):
+    if len(p) != 3:
+        out.append(f"!! 请求须3字节，实际{len(p)}")
+        if len(p) < 3:
+            return
+    action, param = p[0], u16(p, 1)
+    extra = f"（{name_of(MEASURE_TYPES, param)}）" if action == 2 else ""
+    out.append(f"action_type={name_of(ACTION_TYPES, action)}  action_parameter={param}{extra}")
+    if action not in ACTION_TYPES:
+        out.append("!! 未知或未实现的动作")
+    if action != 2 and param != 0:
+        out.append("!! 非测量动作的 action_parameter 须为 0")
+
+
+def p_action_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 13:
+        out.append(f"!! 成功响应须13字节，实际{len(p)}")
+        if len(p) < 13:
+            return
+    tasks, blocks = u32(p, 5), u32(p, 9)
+    out.append(f"action_type={name_of(ACTION_TYPES, p[1])}  action_parameter={u16(p, 2)}")
+    out.append(f"readiness={name_of(ACTION_READINESS, p[4])}")
+    out.append(f"interruptible_tasks=0x{tasks:08X}({bit_names(tasks, INTERRUPTIBLE_BITS)})")
+    out.append(f"blocking_reasons=0x{blocks:08X}({bit_names(blocks, BLOCKING_BITS)})")
+    unknown = blocks & ~0xFF
+    if unknown:
+        out.append(f"未知阻塞位 0x{unknown:08X}（仍视为阻塞）")
+
+
+def p_telemetry_event(p, out):
+    if len(p) < 13:
+        out.append(f"!! TELEMETRY 不足13字节公共头，实际{len(p)}")
+        return
+    code, when, uptime, extra_len = u16(p, 1), u32(p, 3), u32(p, 7), p[12]
+    extra = bytes(p[13:13 + extra_len])
+    out.append(f"sub_type={p[0]}  event_code=0x{code:04X}（族0x{code >> 8:02X} 动作0x{code & 0xFF:02X}）")
+    out.append(f"event_time_s={when}({s_to_str(when) if when else '无UTC'})  uptime_ms={uptime}")
+    out.append(f"extension_version={p[11]}  extra_data_len={extra_len}")
+    if extra:
+        out.append(f"extra_data=\"{extra.decode('utf-8', 'replace')}\"")
+    if extra_len < 1:
+        out.append("!! extra_data_len 须至少 1 字节")
+    if b"\x00" in extra:
+        out.append("!! extra_data 不得含 NUL")
+    if len(p) != 13 + extra_len:
+        out.append(f"!! payload 须为 13+N={13 + extra_len}，实际{len(p)}")
+
+
+def p_reminder_caps(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 13:
+        out.append(f"!! 成功响应须13字节，实际{len(p)}")
+        if len(p) < 13:
+            return
+    flags, metrics = u16(p, 1), u32(p, 3)
+    names = [name_of(ALERT_METRICS, i + 1) for i in range(32) if metrics & (1 << i)]
+    sigs = [n for bit, n in [(0, "灯光"), (1, "震动"), (2, "蜂鸣器")] if p[7] & (1 << bit)]
+    out.append(f"feature_flags=0x{flags:04X}({bit_names(flags, REMINDER_FEATURE_BITS)})")
+    out.append(f"metric_mask=0x{metrics:08X}({'/'.join(names) if names else '无'})")
+    out.append(f"signal_mask=0x{p[7]:02X}({'/'.join(sigs) if sigs else '无物理输出'})")
+    out.append(f"alarm_mode_mask=0x{p[8]:02X}({bit_names(p[8], ALARM_MODE_BITS)})")
+    out.append(f"max_alarm_count={p[9]}  max_rule_count={p[10]}  max_duration_s={u16(p, 11)}")
+    if flags & ~0x1F or p[7] & ~0x07 or p[8] & ~0x03 or metrics & ~0x07:
+        out.append("!! 能力保留位须为 0")
+
+
+def emit_alert_rules(p, o, count, out):
+    for i in range(count):
+        if o + 12 > len(p):
+            out.append(f"!! 规则{i + 1}不足12字节")
+            return None
+        mask = p[o + 1]
+        parts = []
+        if mask & 0x01:
+            parts.append(f"下限{i32(p, o + 2)}")
+        if mask & 0x02:
+            parts.append(f"上限{i32(p, o + 6)}")
+        if mask & ~0x03:
+            parts.append(f"保留位0x{mask & ~0x03:02X}")
+        out.append(f"  规则{i + 1}: {name_of(ALERT_CONTEXTS, p[o])}  "
+                   f"{'/'.join(parts) if parts else '无阈值'}  持续{u16(p, o + 10)}s")
+        o += 12
+    return o
+
+
+def emit_alert_config(p, o, out, with_revision):
+    need = 12 if with_revision else 8
+    if o + need > len(p):
+        out.append(f"!! 提醒配置不足{need}字节")
+        return None
+    if with_revision:
+        out.append(f"config_revision={u32(p, o)}")
+        base = o + 4
+    else:
+        base = o
+    out.append(f"enabled={p[base]}  cooldown_min={u16(p, base + 1)}")
+    out.append(format_reminder_ref(p[base + 3:base + 7]))
+    count = p[base + 7]
+    out.append(f"rule_count={count}")
+    end = emit_alert_rules(p, base + 8, count, out)
+    if end is None:
+        return None
+    if end != len(p):
+        out.append(f"!! 规则结束后长度差 {len(p) - end} 字节")
+    return end
+
+
+def p_get_alert_req(p, out):
+    if len(p) != 2:
+        out.append(f"!! 请求须2字节，实际{len(p)}")
+        if len(p) < 2:
+            return
+    out.append(f"metric_type={name_of(ALERT_METRICS, u16(p, 0))}")
+
+
+def p_get_alert_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) < 4:
+        out.append("!! 响应过短")
+        return
+    out.append(f"metric_type={name_of(ALERT_METRICS, u16(p, 1))}  "
+               f"runtime_state={name_of(ALERT_RUNTIME, p[3])}")
+    emit_alert_config(p, 4, out, True)
+
+
+def p_set_alert_req(p, out):
+    if len(p) < 6:
+        out.append("!! 请求过短")
+        return
+    out.append(f"operation_id=0x{u32(p, 0):08X}  metric_type={name_of(ALERT_METRICS, u16(p, 4))}")
+    emit_alert_config(p, 6, out, False)
+
+
+def p_set_alert_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) < 7:
+        out.append("!! 响应过短")
+        return
+    out.append(f"operation_id=0x{u32(p, 1):08X}  metric_type={name_of(ALERT_METRICS, u16(p, 5))}")
+    emit_alert_config(p, 7, out, True)
+
+
+def emit_alarm_params(p, o, out):
+    if o + 12 > len(p):
+        out.append("!! 闹钟参数不足12字节")
+        return None
+    out.append(f"enabled={p[o]}  mode={name_of(ALARM_MODES, p[o + 1])}  "
+               f"{p[o + 2]:02d}:{p[o + 3]:02d}")
+    out.append(f"weekday={weekday_text(p[o + 4])}  window_min={p[o + 5]}")
+    out.append(format_reminder_ref(p[o + 6:o + 10]))
+    out.append(f"max_duration_s={u16(p, o + 10)}")
+    return o + 12
+
+
+def emit_alarm_config(p, o, out):
+    if o + 17 > len(p):
+        out.append("!! 闹钟配置不足17字节")
+        return None
+    out.append(f"config_revision={u32(p, o)}  alarm_id={p[o + 4]}")
+    return emit_alarm_params(p, o + 5, out)
+
+
+def p_get_alarm_req(p, out):
+    if len(p) != 1:
+        out.append(f"!! 请求须1字节 alarm_id，实际{len(p)}")
+        return
+    out.append(f"alarm_id={p[0]}")
+
+
+def p_get_alarm_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    emit_alarm_config(p, 1, out)
+    if len(p) != 18:
+        out.append(f"!! 成功响应须18字节，实际{len(p)}")
+
+
+def p_set_alarm_req(p, out):
+    if len(p) != 17:
+        out.append(f"!! 更新请求须17字节，实际{len(p)}")
+        if len(p) < 17:
+            return
+    out.append(f"operation_id=0x{u32(p, 0):08X}  alarm_id={p[4]}")
+    emit_alarm_params(p, 5, out)
+
+
+def p_set_alarm_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 22:
+        out.append(f"!! 成功响应须22字节，实际{len(p)}")
+        if len(p) < 22:
+            return
+    out.append(f"operation_id=0x{u32(p, 1):08X}")
+    emit_alarm_config(p, 5, out)
+
+
+def p_create_alarm_req(p, out):
+    if len(p) != 16:
+        out.append(f"!! 创建请求须16字节，实际{len(p)}")
+        if len(p) < 16:
+            return
+    out.append(f"operation_id=0x{u32(p, 0):08X}")
+    emit_alarm_params(p, 4, out)
+
+
+def p_alarm_list_req(p, out):
+    if len(p) != 2:
+        out.append(f"!! 请求须2字节，实际{len(p)}")
+        return
+    out.append(f"after_alarm_id={p[0]}  max_count={p[1]}")
+    if p[1] == 0:
+        out.append("!! max_count 须为 1..255")
+
+
+def p_alarm_list_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) < 4:
+        out.append("!! 响应过短")
+        return
+    total, count, nxt = p[1], p[2], p[3]
+    out.append(f"total_count={total}  item_count={count}  next_after_alarm_id={nxt}")
+    if len(p) != 4 + 17 * count:
+        out.append(f"!! 响应须{4 + 17 * count}字节，实际{len(p)}")
+    off = 4
+    for i in range(count):
+        out.append(f"—— 第{i + 1}条 ——")
+        end = emit_alarm_config(p, off, out)
+        if end is None:
+            return
+        off = end
+
+
+def p_delete_alarm_req(p, out):
+    if len(p) != 5:
+        out.append(f"!! 请求须5字节，实际{len(p)}")
+        if len(p) < 5:
+            return
+    out.append(f"operation_id=0x{u32(p, 0):08X}  alarm_id={p[4]}")
+
+
+def p_delete_alarm_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 6:
+        out.append(f"!! 成功响应须6字节，实际{len(p)}")
+        if len(p) < 6:
+            return
+    out.append(f"operation_id=0x{u32(p, 1):08X}  alarm_id={p[5]}")
+
+
+def emit_vibration_params(p, o, out):
+    if o + 8 > len(p):
+        out.append("!! 震动参数不足8字节")
+        return None
+    on_ms, off_ms = u16(p, o), u16(p, o + 2)
+    repeat, groups, gap = p[o + 4], p[o + 5], u16(p, o + 6)
+    out.append(f"on_ms={on_ms}  off_ms={off_ms}  repeat_count={repeat}  "
+               f"group_count={groups}  group_gap_ms={gap}")
+    if on_ms == 0 or repeat == 0:
+        out.append("说明: 单次时长或重复次数为 0，实际不输出震动")
+    return o + 8
+
+
+def p_vibrate_now_req(p, out):
+    if len(p) != 6:
+        out.append(f"!! 请求须6字节，实际{len(p)}")
+        if len(p) < 6:
+            return
+    out.append(format_reminder_ref(p[0:4]))
+    dur = u16(p, 4)
+    out.append(f"max_duration_s={dur}")
+    if p[0] == 0:
+        out.append("!! 立即提醒必须选择至少一个通道")
+    if dur == 0:
+        out.append("!! max_duration_s 不能为 0")
+
+
+def p_vibrate_now_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 7:
+        out.append(f"!! 成功响应须7字节，实际{len(p)}")
+        if len(p) < 7:
+            return
+    out.append(f"reminder_id={u32(p, 1)}  accepted_duration_s={u16(p, 5)}")
+    out.append("说明: 立即提醒是否生成 REMINDER_TRIGGERED 由产品策略决定；断连后仍按时长结束")
+
+
+def p_get_vibration_template_req(p, out):
+    if len(p) != 1:
+        out.append(f"!! 请求须1字节 template_id，实际{len(p)}")
+        return
+    out.append(f"template_id={p[0]}")
+    if p[0] == 0:
+        out.append("!! template_id 须为 1..255")
+
+
+def p_get_vibration_template_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 10:
+        out.append(f"!! 成功响应须10字节，实际{len(p)}")
+        if len(p) < 10:
+            return
+    out.append(f"振动类型：震动模板 {p[1]}")
+    out.append(f"单次震动时长：{u16(p, 2)} 毫秒")
+    out.append(f"template_id={p[1]}")
+    emit_vibration_params(p, 2, out)
+
+
+def p_set_vibration_template_req(p, out):
+    if len(p) != 13:
+        out.append(f"!! 请求须13字节，实际{len(p)}")
+        if len(p) < 13:
+            return
+    out.append(f"振动类型：震动模板 {p[4]}")
+    out.append(f"单次震动时长：{u16(p, 5)} 毫秒")
+    out.append(f"operation_id=0x{u32(p, 0):08X}  template_id={p[4]}")
+    emit_vibration_params(p, 5, out)
+
+
+def p_set_vibration_template_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 14:
+        out.append(f"!! 成功响应须14字节，实际{len(p)}")
+        if len(p) < 14:
+            return
+    out.append(f"振动类型：震动模板 {p[5]}")
+    out.append(f"单次震动时长：{u16(p, 6)} 毫秒")
+    out.append(f"operation_id=0x{u32(p, 1):08X}  template_id={p[5]}")
+    emit_vibration_params(p, 6, out)
+
+
+def p_vibrate_stop_req(p, out):
+    if len(p) != 4:
+        out.append(f"!! 请求须4字节，实际{len(p)}")
+        if len(p) < 4:
+            return
+    out.append(f"reminder_id={u32(p, 0)}")
+
+
+def p_vibrate_stop_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 5:
+        out.append(f"!! 成功响应须5字节，实际{len(p)}")
+        if len(p) < 5:
+            return
+    out.append(f"reminder_id={u32(p, 1)}")
+
+
+def p_alarm_stop_req(p, out):
+    if len(p) != 9:
+        out.append(f"!! 请求须9字节，实际{len(p)}")
+        if len(p) < 9:
+            return
+    out.append(f"alarm_id={p[0]}  event_id={u64(p, 1)}")
+
+
+def p_alarm_stop_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 10:
+        out.append(f"!! 成功响应须10字节，实际{len(p)}")
+        if len(p) < 10:
+            return
+    out.append(f"alarm_id={p[1]}  event_id={u64(p, 2)}")
+
+
+def reminder_type_lines(body):
+    """上报最上方两行：振动类型、单次时长。时长不在 0x44 里。"""
+    reason, code = body[17], u16(body, 18)
+    rem = body[27:31]
+    chans = [n for bit, n in [(0, "灯光"), (1, "震动"), (2, "蜂鸣器")] if rem[0] & (1 << bit)]
+    kind = f"{cn_only(name_of(REMINDER_REASONS, reason))} / {reason_code_text(reason, code)}"
+    chan = "/".join(chans) if chans else "无物理输出"
+    vib = f"震动模板={rem[1]}" if rem[1] else "震动模板=未选"
+    return (
+        f"振动类型：{kind}；通道：{chan}；{vib}",
+        "单次震动时长：本帧没有毫秒数，只有模板编号；on_ms 在查询震动模板 0x15",
+    )
+
+
+def emit_reminder_body(body, out):
+    """1106 提醒事件内容：固定前缀32字节 + metric_count*6。"""
+    if len(body) < 32:
+        out.append(f"!! 提醒body不足32字节，实际{len(body)}")
+        return "提醒触发"
+    reason, code = body[17], u16(body, 18)
+    count = body[31]
+    for line in reminder_type_lines(body):
+        out.append(line)
+    out.append(f"event_id={u64(body, 0)}")
+    ts, flags = u64(body, 8), body[16]
+    shown = ms_to_str(ts) if flags & 0x01 and ts else "无UTC"
+    out.append(f"timestamp_ms={ts}({shown})  time_flags=0x{flags:02X} UTC_VALID={flags & 1}")
+    out.append(f"reason={name_of(REMINDER_REASONS, reason)}  "
+               f"reason_code={reason_code_text(reason, code)}")
+    out.append(f"source_id={u16(body, 20)}  config_revision={u32(body, 22)}  "
+               f"context={name_of(ALERT_CONTEXTS, body[26])}")
+    out.append(f"reminder: {format_reminder_ref(body[27:31])}")
+    out.append(f"metric_count={count}")
+    if flags & ~0x01:
+        out.append("!! time_flags 保留位须为 0")
+    if not (flags & 0x01) and ts != 0:
+        out.append("!! 无UTC时 timestamp_ms 须为 0")
+    if reason == 0:
+        out.append("!! reason_type=0 当前协议不发送")
+    offset = 32
+    for i in range(count):
+        if offset + 6 > len(body):
+            out.append(f"!! 指标{i + 1}不足6字节")
+            break
+        out.append(f"  指标{i + 1}: {name_of(ALERT_METRICS, u16(body, offset))} = {i32(body, offset + 2)}")
+        offset += 6
+    expect = 32 + 6 * count
+    if len(body) != expect:
+        out.append(f"!! 提醒body须为{expect}字节，实际{len(body)}")
+    if count > 15:
+        out.append("!! metric_count 本期最大15")
+    return f"{name_of(REMINDER_REASONS, reason)}/{reason_code_text(reason, code)}"
+
+
+def parse_device_event_record(raw, out):
+    """1106 DeviceEventRecord：4字节公共头 + body + crc16，最长128字节。"""
+    if len(raw) < 6:
+        out.append(f"!! 设备事件记录不足6字节，实际{len(raw)}")
+        return "设备事件"
+    schema, event_type, body_len = raw[0], raw[1], u16(raw, 2)
+    out.append(f"schema_version={schema}  event_type={name_of(DEVICE_EVENT_TYPES, event_type)}  "
+               f"body_len={body_len}")
+    if schema != 1:
+        out.append("!! schema_version 须为 1；未知版本按外层长度保留")
+    if body_len > 122:
+        out.append("!! body_len 须 <=122")
+    expect = 6 + body_len
+    if len(raw) != expect:
+        out.append(f"!! 记录长度须为{expect}，实际{len(raw)}")
+    body = bytes(raw[4:4 + body_len]) if len(raw) >= 4 + body_len else bytes(raw[4:])
+    if len(raw) == expect:
+        got, calc = u16(raw, len(raw) - 2), crc16_ccitt_false(raw[:-2])
+        out.append(f"crc16=0x{got:04X}" + ("" if got == calc else f"  !! 计算值0x{calc:04X}"))
+    if schema == 1 and event_type == 1:
+        return emit_reminder_body(body, out)
+    out.append(f"body={hexs(body[:48])}" + (" …" if len(body) > 48 else ""))
+    return name_of(DEVICE_EVENT_TYPES, event_type)
+
+
+def device_event_offline_text(raw):
+    lines = []
+    summary = parse_device_event_record(raw, lines)
+    return summary, "；".join(lines)
+
+
+def p_reminder_triggered(p, out):
+    if not p:
+        out.append("!! 空事件")
+        return
+    persisted = bool(p[0] & 1)
+    out.append(f"delivery_flags=0x{p[0]:02X}（{'已落库' if persisted else '未落库'}）")
+    if persisted:
+        out.append("说明: 已写入 dataset=5，可用离线同步按 device_id+event_id 去重取回")
+    else:
+        out.append("说明: 未落库（策略不要求或写失败），不能保证有离线对应记录")
+    if p[0] & ~0x01:
+        out.append(f"!! delivery_flags 保留位 0x{p[0] & ~1:02X} 须为 0")
+    parse_device_event_record(p[1:], out)
+    if len(p) >= 3 and p[2] != 1:
+        out.append("!! REMINDER_TRIGGERED 只承载 event_type=1")
+
+
+def s_reminder_triggered(p):
+    if not p:
+        return ""
+    tag = "已落库" if p[0] & 1 else "未落库"
+    if len(p) < 39:
+        return tag
+    body = p[5:37]
+    if len(body) < 32:
+        return tag
+    reason, code = body[17], u16(body, 18)
+    code_name = REMINDER_REASON_CODES.get(reason, {}).get(code, f"码{code}")
+    vib = body[28]
+    return (f"{tag}，振动类型：{cn_only(name_of(REMINDER_REASONS, reason))}/{code_name}"
+            f"，震动模板={vib or '未选'}，单次时长不在本帧，事件号{u64(body, 0)}")
+
+
+def _path_at(p, o, out):
+    if o >= len(p):
+        out.append("!! 缺少路径")
+        return None
+    n = p[o]
+    if not (1 <= n <= 96) or o + 1 + n > len(p):
+        out.append(f"!! path_len={n} 非法或超出 payload")
+        return None
+    out.append(f"path({n})=\"{bytes(p[o + 1:o + 1 + n]).decode('ascii', 'replace')}\"")
+    return o + 1 + n
+
+
+def p_file_pull_open_req(p, out):
+    end = _path_at(p, 0, out)
+    if end is not None and end != len(p):
+        out.append(f"!! 路径后多余 {len(p) - end} 字节")
+
+
+def p_file_pull_open_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 13:
+        out.append(f"!! 成功响应须13字节，实际{len(p)}")
+        return
+    out.append(f"transfer_id={u32(p, 1)}  total_bytes={u32(p, 5)}  file_crc32=0x{u32(p, 9):08X}")
+
+
+def p_file_pull_read_req(p, out):
+    if len(p) != 10:
+        out.append(f"!! 请求须10字节，实际{len(p)}")
+        if len(p) < 10:
+            return
+    out.append(f"transfer_id={u32(p, 0)}  offset={u32(p, 4)}  max_bytes={u16(p, 8)}")
+
+
+def p_file_pull_read_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) < 19:
+        out.append("!! 响应不足19字节前缀")
+        return
+    n = u16(p, 17)
+    data = bytes(p[19:19 + n])
+    out.append(f"transfer_id={u32(p, 1)}  offset={u32(p, 5)}  next_offset={u32(p, 9)}  "
+               f"total_bytes={u32(p, 13)}  data_len={n}")
+    if len(p) < 19 + n + 4:
+        out.append("!! data 或 chunk_crc32 被截断")
+        return
+    crc = u32(p, 19 + n)
+    calc = zlib.crc32(data) & 0xFFFFFFFF
+    out.append(f"chunk_crc32=0x{crc:08X}" + ("" if crc == calc else f"  !! 计算值0x{calc:08X}"))
+    if n == 0:
+        out.append("!! 成功块 data_len 不得为 0")
+    if len(p) != 19 + n + 4:
+        out.append(f"!! 长度应为{19 + n + 4}，实际{len(p)}")
+
+
+def p_file_id_req(p, out):
+    if len(p) != 4:
+        out.append(f"!! 请求须4字节，实际{len(p)}")
+        if len(p) < 4:
+            return
+    out.append(f"transfer_id={u32(p, 0)}")
+
+
+def p_file_id_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 5:
+        out.append(f"!! 成功响应须5字节，实际{len(p)}")
+        return
+    out.append(f"transfer_id={u32(p, 1)}")
+
+
+def p_stream_open_req(p, out):
+    if len(p) < 9:
+        out.append("!! 请求不足9字节")
+        return
+    out.append(f"start_offset={u32(p, 0)}  requested_window_bytes={u32(p, 4)}")
+    end = _path_at(p, 8, out)
+    if end is not None and end != len(p):
+        out.append(f"!! 多余 {len(p) - end} 字节")
+
+
+def p_stream_open_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 21:
+        out.append(f"!! 成功响应须21字节，实际{len(p)}")
+        if len(p) < 21:
+            return
+    out.append(f"transfer_id={u32(p, 1)}  total_bytes={u32(p, 5)}  file_crc32=0x{u32(p, 9):08X}")
+    out.append(f"start_offset={u32(p, 13)}  window_end_offset={u32(p, 17)}")
+
+
+def p_stream_cont_req(p, out):
+    if len(p) != 12:
+        out.append(f"!! 请求须12字节，实际{len(p)}")
+        if len(p) < 12:
+            return
+    out.append(f"transfer_id={u32(p, 0)}  next_offset={u32(p, 4)}  "
+               f"requested_window_bytes={u32(p, 8)}")
+
+
+def p_stream_cont_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 13:
+        out.append(f"!! 成功响应须13字节，实际{len(p)}")
+        if len(p) < 13:
+            return
+    out.append(f"transfer_id={u32(p, 1)}  start_offset={u32(p, 5)}  window_end_offset={u32(p, 9)}")
+
+
+def p_stream_stop_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 9:
+        out.append(f"!! 成功响应须9字节，实际{len(p)}")
+        if len(p) < 9:
+            return
+    out.append(f"transfer_id={u32(p, 1)}  next_offset={u32(p, 5)}")
+
+
+def p_stream_data(p, out):
+    if len(p) < 14:
+        out.append("!! STREAM_DATA 不足14字节前缀")
+        return
+    n = u16(p, 12)
+    out.append(f"transfer_id={u32(p, 0)}  stream_seq={u32(p, 4)}  offset={u32(p, 8)}  data_len={n}")
+    if len(p) != 14 + n:
+        out.append(f"!! 长度应为{14 + n}，实际{len(p)}")
+    if n == 0:
+        out.append("!! data_len 不得为 0")
+
+
+def p_stream_end(p, out):
+    if len(p) != 17:
+        out.append(f"!! STREAM_END 须17字节，实际{len(p)}")
+        if len(p) < 17:
+            return
+    out.append(f"transfer_id={u32(p, 0)}  end_reason={name_of(FILE_END_REASONS, p[4])}")
+    out.append(f"next_offset={u32(p, 5)}  total_bytes={u32(p, 9)}  file_crc32=0x{u32(p, 13):08X}")
+
+
+def p_push_open_req(p, out):
+    end = _path_at(p, 0, out)
+    if end is None:
+        return
+    if end + 8 > len(p):
+        out.append("!! 缺少 total_bytes/file_crc32")
+        return
+    out.append(f"total_bytes={u32(p, end)}  file_crc32=0x{u32(p, end + 4):08X}")
+    if end + 8 != len(p):
+        out.append(f"!! 长度不符，实际{len(p)}")
+
+
+def p_push_open_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 9:
+        out.append(f"!! 成功响应须9字节，实际{len(p)}")
+        if len(p) < 9:
+            return
+    out.append(f"transfer_id={u32(p, 1)}  next_offset={u32(p, 5)}")
+
+
+def p_push_write_req(p, out):
+    if len(p) < 14:
+        out.append("!! 请求不足14字节前缀")
+        return
+    n = u16(p, 8)
+    data = bytes(p[14:14 + n])
+    out.append(f"transfer_id={u32(p, 0)}  offset={u32(p, 4)}  data_len={n}  "
+               f"chunk_crc32=0x{u32(p, 10):08X}")
+    if len(p) < 14 + n:
+        out.append("!! data 被截断")
+        return
+    calc = zlib.crc32(data) & 0xFFFFFFFF
+    if calc != u32(p, 10):
+        out.append(f"!! chunk_crc32 计算值 0x{calc:08X}")
+    if len(p) != 14 + n:
+        out.append(f"!! 长度应为{14 + n}，实际{len(p)}")
+
+
+def p_push_write_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 9:
+        out.append(f"!! 成功响应须9字节，实际{len(p)}")
+        if len(p) < 9:
+            return
+    out.append(f"transfer_id={u32(p, 1)}  next_offset={u32(p, 5)}")
+
+
+def p_push_commit_req(p, out):
+    if len(p) != 8:
+        out.append(f"!! 请求须8字节，实际{len(p)}")
+        if len(p) < 8:
+            return
+    out.append(f"transfer_id={u32(p, 0)}  operation_id=0x{u32(p, 4):08X}")
+
+
+def p_push_commit_resp(p, out):
+    if not _status_ok(p, out):
+        return
+    if len(p) != 9:
+        out.append(f"!! 成功响应须9字节，实际{len(p)}")
+        if len(p) < 9:
+            return
+    out.append(f"transfer_id={u32(p, 1)}  operation_id=0x{u32(p, 5):08X}")
+
+
 # ---------------------------------------------------------------------------
 # 大白话摘要 (给非专业人员看的"指令介绍")
 # ---------------------------------------------------------------------------
@@ -2304,9 +3307,12 @@ def p_generic_op_resp(p, out):
 CMD_CN = {
     (0x01, 0x01): "查询设备能力", (0x01, 0x02): "查询设备签名", (0x01, 0x03): "查询设备电量",
     (0x01, 0x04): "同步手机时间", (0x01, 0x05): "查询设备信息", (0x01, 0x06): "查询用户资料",
-    (0x01, 0x07): "设置用户资料", (0x01, 0x10): "请求认证随机数", (0x01, 0x11): "设置认证密钥",
-    (0x01, 0x12): "提交认证证明", (0x01, 0x20): "恢复出厂设置(清除用户数据)",
-    (0x01, 0x21): "重启设备", (0x01, 0x40): "电量变化", (0x01, 0x41): "日志",
+    (0x01, 0x07): "设置用户资料", (0x01, 0x08): "读取身份凭证",
+    (0x01, 0x09): "查询动作是否可执行", (0x01, 0x10): "请求认证随机数",
+    (0x01, 0x11): "设置认证密钥",
+    (0x01, 0x12): "提交认证证明", (0x01, 0x20): "恢复出厂设置(清除用户数据和绑定)",
+    (0x01, 0x21): "重启设备", (0x01, 0x22): "清除用户数据(保留绑定)",
+    (0x01, 0x40): "电量变化", (0x01, 0x41): "日志", (0x01, 0x42): "固件埋点",
     (0x10, 0x01): "打开离线数据同步", (0x10, 0x02): "拉取离线数据页",
     (0x10, 0x03): "关闭离线数据同步", (0x10, 0x40): "离线数据分片",
     (0x20, 0x01): "开始测量", (0x20, 0x02): "停止测量", (0x20, 0x03): "查询测量状态",
@@ -2316,8 +3322,19 @@ CMD_CN = {
     (0x50, 0x06): "查询电源模式", (0x50, 0x07): "设置电源模式",
     (0x50, 0x08): "查询佩戴状态", (0x50, 0x09): "查询iBeacon配置",
     (0x50, 0x0A): "设置iBeacon配置", (0x50, 0x0B): "查询睡眠状态",
+    (0x50, 0x0C): "查询提醒能力", (0x50, 0x0D): "查询健康异常提醒",
+    (0x50, 0x0E): "设置健康异常提醒", (0x50, 0x0F): "查询闹钟",
+    (0x50, 0x10): "更新闹钟", (0x50, 0x11): "删除闹钟",
+    (0x50, 0x12): "立即提醒", (0x50, 0x13): "停止立即提醒", (0x50, 0x14): "停止闹钟",
+    (0x50, 0x15): "查询震动模板", (0x50, 0x16): "设置震动模板",
+    (0x50, 0x17): "创建闹钟", (0x50, 0x18): "查询闹钟列表",
     (0x50, 0x40): "充电仓电量变化", (0x50, 0x41): "佩戴状态变化",
     (0x50, 0x42): "找设备结束", (0x50, 0x43): "睡眠状态变化",
+    (0x50, 0x44): "提醒已触发",
+    (0x60, 0x01): "打开文件下载", (0x60, 0x02): "读取文件块", (0x60, 0x03): "关闭文件下载",
+    (0x60, 0x04): "打开文件流", (0x60, 0x05): "继续文件流", (0x60, 0x06): "停止文件流",
+    (0x60, 0x10): "打开文件上传", (0x60, 0x11): "写入文件块", (0x60, 0x12): "提交文件",
+    (0x60, 0x13): "放弃文件上传", (0x60, 0x40): "文件流数据", (0x60, 0x41): "文件流结束",
     (0x70, 0x01): "查询运动能力", (0x70, 0x02): "查询运动状态",
     (0x70, 0x03): "查询运动自动识别配置", (0x70, 0x04): "设置运动自动识别配置",
     (0x70, 0x05): "配置实时数据扩展", (0x70, 0x06): "查询实时扩展能力",
@@ -2436,8 +3453,11 @@ def s_offline_data(p):
 
 
 def s_find_req(p):
-    sigs = [n for bit, n in [(0, "LED"), (1, "振动"), (2, "蜂鸣器")] if p[0] & (1 << bit)]
-    return f"{'/'.join(sigs) if sigs else '默认方式'}，{u16(p, 1)} 秒"
+    if len(p) != 6:
+        return f"请求{len(p)}字节，须6字节"
+    sigs = [n for bit, n in [(0, "灯光"), (1, "震动"), (2, "蜂鸣器")] if p[0] & (1 << bit)]
+    dur = u16(p, 4)
+    return f"{'/'.join(sigs) if sigs else '无通道'}，{dur if dur else '默认'}秒"
 
 
 def s_measure_start_resp(p):
@@ -2539,7 +3559,16 @@ SUMMARIES = {
     (0x01, 0x07, "resp"): lambda p: s_user_profile(p, 5),
     (0x01, 0x10, "resp"): lambda p: f"认证结果：{cn_only(name_of(AUTH_RESULTS, p[1]))}",
     (0x01, 0x11, "resp"): lambda p: f"密钥设置：{cn_only(name_of(AUTH_RESULTS, p[1]))}",
+    (0x01, 0x08, "resp"): lambda p: (
+        f"凭证{u16(p, 2)}字节" if len(p) >= 4 and p[0] == 0 else ""),
+    (0x01, 0x09, "req"): lambda p: name_of(ACTION_TYPES, p[0]) if p else "",
+    (0x01, 0x09, "resp"): lambda p: (
+        cn_only(name_of(ACTION_READINESS, p[4])) if len(p) >= 5 and p[0] == 0 else ""),
     (0x01, 0x12, "resp"): lambda p: f"认证结果：{cn_only(name_of(AUTH_RESULTS, p[1]))}",
+    (0x01, 0x22, "resp"): lambda p: (
+        "清除用户数据已受理，清理在后台进行" if p and p[0] == 0 else ""),
+    (0x01, 0x42, "event"): lambda p: (
+        f"埋点 类别{p[0]} 事件0x{u16(p, 1):04X}" if len(p) >= 3 else ""),
     (0x01, 0x40, "event"): lambda p: s_battery(p, 0),
     (0x10, 0x01, "req"): lambda p: f"{cn_only(name_of(DATASETS, p[0]))}数据，{'全量' if u32(p, 3) == 0 else '增量'}同步",
     (0x10, 0x01, "resp"): lambda p: f"待传 {u32(p, 20)} 条记录",
@@ -2565,9 +3594,7 @@ SUMMARIES = {
     (0x20, 0x05, "req"): lambda p: f"{cn_only(name_of(MEASURE_TYPES, p[4]))}周期设为 {u16(p, 5)} 分钟",
     (0x20, 0x05, "resp"): lambda p: (
         f"{cn_only(name_of(MEASURE_TYPES, p[5]))}周期 {u16(p, 6)} 分钟" if len(p) >= 8 else ""),
-    (0x01, 0x41, "event"): lambda p: (
-        bytes(p[16 + p[13]:16 + p[13] + u16(p, 14)]).decode("utf-8", "replace")[:40]
-        if len(p) >= 16 else ""),
+    (0x01, 0x41, "event"): s_log_event,
     (0x20, 0x40, "event"): s_measure_data,
     (0x50, 0x01, "resp"): lambda p: s_case(p, 1),
     (0x50, 0x02, "req"): s_find_req,
@@ -2586,6 +3613,18 @@ SUMMARIES = {
     (0x50, 0x0A, "req"): lambda p: s_ibeacon_cfg(p[4], p[5]) if len(p) >= 6 else "请求过短",
     (0x50, 0x0A, "resp"): lambda p: s_ibeacon_cfg(p[5], p[6], p[7]) if len(p) >= 8 else "响应过短",
     (0x50, 0x0B, "resp"): lambda p: cn_only(name_of(SLEEP_STATES, p[1])),
+    (0x50, 0x0C, "resp"): lambda p: (
+        f"最长{u16(p, 11)}秒" if len(p) >= 13 and p[0] == 0 else ""),
+    (0x50, 0x0D, "req"): lambda p: name_of(ALERT_METRICS, u16(p, 0)) if len(p) >= 2 else "",
+    (0x50, 0x12, "req"): lambda p: f"{u16(p, 4)}秒" if len(p) >= 6 else "",
+    (0x50, 0x12, "resp"): lambda p: (
+        f"编号{u32(p, 1)}，{u16(p, 5)}秒" if len(p) >= 7 and p[0] == 0 else ""),
+    (0x50, 0x13, "req"): lambda p: f"编号{u32(p, 0)}" if len(p) >= 4 else "",
+    (0x50, 0x44, "event"): s_reminder_triggered,
+    (0x60, 0x01, "resp"): lambda p: (
+        f"{u32(p, 5)}字节" if len(p) >= 13 and p[0] == 0 else ""),
+    (0x60, 0x41, "event"): lambda p: (
+        cn_only(name_of(FILE_END_REASONS, p[4])) if len(p) >= 5 else ""),
     (0x50, 0x40, "event"): lambda p: s_case(p, 0),
     (0x50, 0x41, "event"): lambda p: f"变为「{cn_only(name_of(WEAR_STATES, p[0]))}」",
     (0x50, 0x42, "event"): lambda p: cn_only(name_of(FIND_END_REASONS, p[2])),
@@ -2648,7 +3687,8 @@ def offline_open_no_data(direction, domain, opcode, flags, payload):
 
 def offline_no_data_summary(payload):
     ds = payload[1] if len(payload) > 1 else 0
-    name = {1: "健康历史", 2: "算法中间数据", 3: "诊断记录", 4: "运动历史"}.get(ds, "离线数据")
+    name = {1: "健康历史", 2: "算法中间数据", 3: "诊断记录", 4: "运动历史",
+            5: "设备事件"}.get(ds, "离线数据")
     return f"▲ 设备回复：{name}当前没有需要同步的数据，本次同步正常结束"
 
 
@@ -2723,13 +3763,19 @@ PARSERS = {
     (0x01, 0x11, "req"): lambda p, out: out.append(f"auth_key[16]={hexs(p[0:16])}"),
     (0x01, 0x11, "resp"): p_auth_resp,
     (0x01, 0x12, "req"): lambda p, out: out.append(f"encrypted_nonce[16]={hexs(p[0:16])}"),
+    (0x01, 0x08, "resp"): p_identity_resp,
+    (0x01, 0x09, "req"): p_action_req,
+    (0x01, 0x09, "resp"): p_action_resp,
     (0x01, 0x12, "resp"): p_auth_resp,
     (0x01, 0x20, "req"): p_generic_op_req,
     (0x01, 0x20, "resp"): p_generic_op_resp,
     (0x01, 0x21, "req"): p_generic_op_req,
     (0x01, 0x21, "resp"): p_generic_op_resp,
+    (0x01, 0x22, "req"): p_generic_op_req,
+    (0x01, 0x22, "resp"): p_user_data_reset_resp,
     (0x01, 0x40, "any"): lambda p, out: p_battery_snapshot(p, out, 0),
     (0x01, 0x41, "any"): p_log_event,
+    (0x01, 0x42, "any"): p_telemetry_event,
     (0x10, 0x01, "req"): p_offline_open_req,
     (0x10, 0x01, "resp"): p_offline_open_resp,
     (0x10, 0x02, "req"): p_offline_pull_req,
@@ -2766,11 +3812,59 @@ PARSERS = {
     (0x50, 0x0A, "req"): p_set_ibeacon_req,
     (0x50, 0x0A, "resp"): p_set_ibeacon_resp,
     (0x50, 0x0B, "resp"): lambda p, out: p_sleep_state(p, out, 1),
+    (0x50, 0x0C, "resp"): p_reminder_caps,
+    (0x50, 0x0D, "req"): p_get_alert_req,
+    (0x50, 0x0D, "resp"): p_get_alert_resp,
+    (0x50, 0x0E, "req"): p_set_alert_req,
+    (0x50, 0x0E, "resp"): p_set_alert_resp,
+    (0x50, 0x0F, "req"): p_get_alarm_req,
+    (0x50, 0x0F, "resp"): p_get_alarm_resp,
+    (0x50, 0x10, "req"): p_set_alarm_req,
+    (0x50, 0x10, "resp"): p_set_alarm_resp,
+    (0x50, 0x11, "req"): p_delete_alarm_req,
+    (0x50, 0x11, "resp"): p_delete_alarm_resp,
+    (0x50, 0x12, "req"): p_vibrate_now_req,
+    (0x50, 0x12, "resp"): p_vibrate_now_resp,
+    (0x50, 0x13, "req"): p_vibrate_stop_req,
+    (0x50, 0x13, "resp"): p_vibrate_stop_resp,
+    (0x50, 0x14, "req"): p_alarm_stop_req,
+    (0x50, 0x14, "resp"): p_alarm_stop_resp,
+    (0x50, 0x15, "req"): p_get_vibration_template_req,
+    (0x50, 0x15, "resp"): p_get_vibration_template_resp,
+    (0x50, 0x16, "req"): p_set_vibration_template_req,
+    (0x50, 0x16, "resp"): p_set_vibration_template_resp,
+    (0x50, 0x17, "req"): p_create_alarm_req,
+    (0x50, 0x17, "resp"): p_set_alarm_resp,
+    (0x50, 0x18, "req"): p_alarm_list_req,
+    (0x50, 0x18, "resp"): p_alarm_list_resp,
     (0x50, 0x40, "any"): lambda p, out: p_case_battery(p, out, 0),
     (0x50, 0x41, "any"): lambda p, out: p_wear_state(p, out, 0),
     (0x50, 0x42, "any"): lambda p, out: out.append(
         f"find_id={u16(p, 0)}  end_reason={name_of(FIND_END_REASONS, p[2])}"),
     (0x50, 0x43, "any"): lambda p, out: p_sleep_state(p, out, 0),
+    (0x50, 0x44, "any"): p_reminder_triggered,
+    (0x60, 0x01, "req"): p_file_pull_open_req,
+    (0x60, 0x01, "resp"): p_file_pull_open_resp,
+    (0x60, 0x02, "req"): p_file_pull_read_req,
+    (0x60, 0x02, "resp"): p_file_pull_read_resp,
+    (0x60, 0x03, "req"): p_file_id_req,
+    (0x60, 0x03, "resp"): p_file_id_resp,
+    (0x60, 0x04, "req"): p_stream_open_req,
+    (0x60, 0x04, "resp"): p_stream_open_resp,
+    (0x60, 0x05, "req"): p_stream_cont_req,
+    (0x60, 0x05, "resp"): p_stream_cont_resp,
+    (0x60, 0x06, "req"): p_file_id_req,
+    (0x60, 0x06, "resp"): p_stream_stop_resp,
+    (0x60, 0x10, "req"): p_push_open_req,
+    (0x60, 0x10, "resp"): p_push_open_resp,
+    (0x60, 0x11, "req"): p_push_write_req,
+    (0x60, 0x11, "resp"): p_push_write_resp,
+    (0x60, 0x12, "req"): p_push_commit_req,
+    (0x60, 0x12, "resp"): p_push_commit_resp,
+    (0x60, 0x13, "req"): p_file_id_req,
+    (0x60, 0x13, "resp"): p_file_id_resp,
+    (0x60, 0x40, "any"): p_stream_data,
+    (0x60, 0x41, "any"): p_stream_end,
     (0x70, 0x01, "req"): p_exercise_caps_req,
     (0x70, 0x01, "resp"): p_exercise_caps_resp,
     (0x70, 0x02, "req"): lambda p, out: out.append(
@@ -2895,10 +3989,132 @@ def parse_hex_bytes(text):
     return bytes(out), nibble_fixed, glued
 
 
+_VIB_ON_RE = re.compile(r"on=(\d+)\s+off=(\d+)\s+N=(\d+)\s+G=(\d+)\s+gap=(\d+)")
+_VIB_END_RE = re.compile(r"event ENDED id=(\d+).*?elapsed=(\d+)")
+
+
+def _clock_ms(ts):
+    """'HH:MM:SS.mmm' 转为当天毫秒。解析不了就返回 None。"""
+    if not ts or ts.count(":") < 2 or "." not in ts:
+        return None
+    try:
+        h, m, rest = ts.split(":")
+        sec, ms = rest.split(".")
+        return ((int(h) * 60 + int(m)) * 60 + int(sec)) * 1000 + int(ms)
+    except ValueError:
+        return None
+
+
+class VibFollow:
+    """把固件 AFU_VIB 的 on/elapsed 补进紧挨着的 0x44 事件，不单独出一行。"""
+
+    def __init__(self):
+        self.params = None
+        self.elapsed = None
+        self.seen = None
+        self.held = None
+
+    def on_debug(self, ts, text):
+        late = self._take_if_late(ts)
+        matched = _VIB_ON_RE.search(text)
+        if matched:
+            params = tuple(int(x) for x in matched.groups())
+            if params != self.params:
+                released = self._take()
+                self.params = params
+                self.elapsed = None
+                self.seen = ts
+                return released or late
+            return late
+        ended = _VIB_END_RE.search(text)
+        if ended:
+            self.elapsed = int(ended.group(2))
+            return self._take() or late
+        return late
+
+    def on_reminder(self, ts, summary, proto, lines, level):
+        late = self._take_if_late(ts)
+        if self.seen is not None and self._gap(self.seen, ts) > 1000:
+            self.params = None
+            self.elapsed = None
+            self.seen = None
+        if self.params is None:
+            return late, (ts, summary, proto, lines, level)
+        if self.elapsed is not None:
+            summary, lines = self._apply(summary, list(lines))
+            self.params = None
+            self.elapsed = None
+            self.seen = None
+            return late, (ts, summary, proto, lines, level)
+        self.held = (ts, summary, proto, lines, level)
+        return late, None
+
+    def flush(self):
+        return self._take()
+
+    def _take_if_late(self, ts):
+        if not self.held:
+            return None
+        a, b = _clock_ms(self.held[0]), _clock_ms(ts)
+        if a is None or b is None:
+            return None
+        delta = self._gap(self.held[0], ts)
+        if delta > 1000:
+            return self._take()
+        return None
+
+    def _take(self):
+        if not self.held:
+            return None
+        ts, summary, proto, lines, level = self.held
+        self.held = None
+        summary, lines = self._apply(summary, list(lines))
+        self.params = None
+        self.elapsed = None
+        self.seen = None
+        return ts, summary, proto, lines, level
+
+    def _gap(self, a, b):
+        left, right = _clock_ms(a), _clock_ms(b)
+        if left is None or right is None:
+            return 0
+        delta = right - left
+        if delta < 0:
+            delta += 24 * 3600 * 1000
+        return delta
+
+    def _apply(self, summary, lines):
+        if not self.params:
+            return summary, lines
+        on_ms, off_ms, repeat, groups, gap = self.params
+        group = "无限组" if groups == 0 else f"共{groups}组"
+        text = (f"单次震动时长：{on_ms} 毫秒（off={off_ms} 毫秒，每组{repeat}次，"
+                f"{group}，组间隔{gap} 毫秒")
+        if self.elapsed is not None:
+            text += f"；实际走完 {self.elapsed} 毫秒"
+        text += "）"
+        replaced = False
+        new_lines = []
+        for ln in lines:
+            if ln.startswith("单次震动时长："):
+                new_lines.append(text)
+                replaced = True
+            else:
+                new_lines.append(ln)
+        if not replaced:
+            new_lines.insert(0, text)
+        summary = summary.replace(
+            "，单次时长不在本帧",
+            f"，单次{on_ms}毫秒" + (f"，实际{self.elapsed}毫秒" if self.elapsed is not None else ""))
+        return summary, new_lines
+
+
 def classify_line(text):
-    """热路径：普通固件日志不做正则。返回 afu / fw / hci / ''。"""
+    """热路径：普通固件日志不做正则。返回 afu / fw / hci / vib / ''。"""
     if " raw " in text or text.startswith("tx raw") or text.startswith("rx raw"):
         return "afu"
+    if "AFU_VIB" in text and (" on=" in text or "elapsed=" in text):
+        return "vib"
     if "EXERCISE_REALTIME" in text:
         return "fw"
     s = text.lstrip()
@@ -3132,7 +4348,7 @@ def install_crash_log(log_dir: Path):
 
 
 def workstation_is_locked():
-    """Windows 锁屏时前台窗口为 0。macOS 不据此暂停界面。"""
+    """锁屏时前台窗口为 0。不改写任何窗口过程，避免把 Tk 打崩。"""
     if sys.platform != "win32":
         return False
     try:
@@ -3330,8 +4546,7 @@ class SegmentedLog:
 # GUI
 # ---------------------------------------------------------------------------
 
-# 工具栏对齐 band_tool 串口页：浅底、黑主按钮、白描边、安静按钮、红描边。
-# 日志区保持深色。macOS 的 Aqua 按钮不认 tk.Button 的 bg，所以按钮用 clam 主题画出来。
+# 与 Mac 版同一套：浅色工具栏，深色日志。按钮用 clam 画，避免系统主题把底色冲掉。
 C = {
     "bg": "#f3f3f1",
     "panel": "#ffffff",
@@ -3410,12 +4625,13 @@ class MonitorApp:
         self.offline = OfflineSession()
         self.hci = HciAfuStitcher()
         self.fw_rt = FwRealtimeTrace()
+        self.vib = VibFollow()
         self.segment_stamp = None
         self.log_root = Path(args.log_dir) if args.log_dir else default_log_dir()
         self.serial_log = SegmentedLog(self.log_root / "serial")
         self.parsed_log = SegmentedLog(self.log_root / "parsed")
 
-        root.title("AFU 协议监控 (macOS)")
+        root.title("AFU 协议监控")
         root.geometry("1580x860")
         root.minsize(1180, 640)
         root.configure(bg=C["bg"])
@@ -3531,7 +4747,7 @@ class MonitorApp:
         self._mk_label(inner, "端口", bg=C["bg"]).pack(side=tk.LEFT)
         self.port_var = tk.StringVar(value=self.args.port)
         self.port_combo = ttk.Combobox(inner, textvariable=self.port_var,
-                                       width=36, style="Tool.TCombobox",
+                                       width=12, style="Tool.TCombobox",
                                        font=UI_FONT)
         self.port_combo.pack(side=tk.LEFT, padx=(8, 4))
         self._mk_btn(inner, "刷新", self._refresh_ports, "ghost").pack(side=tk.LEFT, padx=2)
@@ -3767,7 +4983,10 @@ class MonitorApp:
     # ---------------- 串口 ----------------
 
     def _refresh_ports(self):
-        ports = list_serial_ports()
+        try:
+            ports = list_serial_ports()
+        except Exception:
+            ports = []
         self.port_combo.config(values=ports)
         if ports and self.port_var.get().strip() not in ports:
             self.port_var.set(ports[0])
@@ -3797,12 +5016,11 @@ class MonitorApp:
                 messagebox.showerror(
                     "串口打开失败",
                     f"{self.port_var.get()} 打开失败：\n{exc}\n\n"
-                    "请从下拉框选择 /dev/cu. 开头的端口，不要选 /dev/tty.。\n"
-                    "Resource busy：该串口已被其他程序占用，先关掉占用程序再打开。\n"
-                    "Permission denied：到「系统设置 → 隐私与安全性」允许本程序访问串口，\n"
-                    "或在终端执行：sudo chmod a+rw 端口路径。\n"
-                    "列表为空：检查 USB 转串口线。CH340 在 Apple 芯片上通常要先装沁恒驱动。\n"
-                    "2 Mbps 打不开时，把波特率改成该芯片实际支持的速率后再试。")
+                    "若提示 Access denied / 拒绝访问：串口被其他程序占用\n"
+                    "（如 com3_capture.py 采集脚本或其他监控实例），\n"
+                    "请先关闭占用程序，再点顶部「打开」重试。\n\n"
+                    "若提示 系统找不到指定的文件：串口未就绪，\n"
+                    "请检查 USB 转串口连接及设备管理器中的端口号。")
             elif self._hold_open:
                 self._schedule_reconnect(3000, "自动重试")
             return
@@ -4130,6 +5348,11 @@ class MonitorApp:
                 self._emit_parsed(ts, summary, "固件调试 EXERCISE_REALTIME（不是AFU帧）",
                                   lines, "event", parsed_batch, track)
             return
+        if kind == "vib":
+            ready = self.vib.on_debug(ts, text)
+            if ready:
+                self._emit_parsed(*ready, parsed_batch, track)
+            return
         if kind == "hci":
             extra = []
             for afu in self.hci.feed(text):
@@ -4145,7 +5368,18 @@ class MonitorApp:
         direction, _declared, data, nibble_fixed, glued = frame
         result = parse_frame(direction, data)
         extra = self.offline.on_afu(data)
-        if result:
+        is_reminder = len(data) >= 4 and data[2] == 0x50 and data[3] == 0x44 and not (data[4] & 0x01)
+        if result and is_reminder:
+            summary, proto, lines, level = result
+            late, ready = self.vib.on_reminder(ts, summary, proto, lines, level)
+            if late:
+                self._emit_parsed(*late, parsed_batch, track)
+            if ready:
+                self._emit_parsed(*ready, parsed_batch, track)
+        elif result:
+            ready = self.vib.flush()
+            if ready:
+                self._emit_parsed(*ready, parsed_batch, track)
             summary, proto, lines, level = result
             notes = []
             if nibble_fixed:
@@ -4258,6 +5492,7 @@ class MonitorApp:
             self.offline.reset()
             self.hci = HciAfuStitcher()
             self.fw_rt.reset()
+            self.vib = VibFollow()
         self._safe_config(self.count_label, text="已解析 0 帧")
         while True:
             try:
@@ -4513,7 +5748,7 @@ def main():
     ap.add_argument("--port", default="", help="macOS 串口，例如 /dev/cu.usbserial-XXXX；留空则选第一个 /dev/cu.*")
     ap.add_argument("--baud", type=int, default=2_000_000)
     ap.add_argument("--file", default=None, help="离线回放已保存的日志文件")
-    ap.add_argument("--log-dir", default=None, help="日志根目录，默认 exe 同级 logs/")
+    ap.add_argument("--log-dir", default=None, help="日志根目录。打包后的 Mac 应用写到用户的 Application Support")
     ap.add_argument("--selftest", action="store_true", help="锁屏路径自检后退出")
     args = ap.parse_args()
     if args.selftest:
